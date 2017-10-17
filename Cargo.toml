@@ -1,0 +1,11 @@
+[package]
+name = "optional_struct"
+version = "0.1.0"
+authors = ["Paul Lesur <paul.lesur@plesur.fr>"]
+
+[dependencies]
+syn = "0.11.11"
+quote = "0.3"
+
+[lib]
+proc-macro = true
