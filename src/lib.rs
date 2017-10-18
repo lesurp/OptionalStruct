@@ -7,6 +7,7 @@ extern crate quote;
 
 use proc_macro::TokenStream;
 use syn::Field;
+use syn::Ident;
 
 #[proc_macro_derive(OptionalStruct, attributes(optional_name, optional_derive))]
 pub fn optional_struct(input: TokenStream) -> TokenStream {
@@ -17,21 +18,22 @@ pub fn optional_struct(input: TokenStream) -> TokenStream {
 }
 
 fn create_optional_struct(ast: &syn::DeriveInput) -> quote::Tokens {
-    let (struct_name, derives) = parse_attributes(&ast);
+    let (orignal_struct_name, struct_name, derives) = parse_attributes(&ast);
 
     if let syn::Body::Struct(ref variant_data) = ast.body {
         if let &syn::VariantData::Struct(ref fields) = variant_data {
-            return create_non_tuple_struct(fields, struct_name, derives);
+            return create_non_tuple_struct(fields, orignal_struct_name, struct_name, derives);
         }
     }
 
     panic!("OptionalStruct only supports non-tuple structs for now");
 }
 
-fn parse_attributes(ast: &syn::DeriveInput) -> (syn::Ident, quote::Tokens) {
+fn parse_attributes(ast: &syn::DeriveInput) -> (Ident, syn::Ident, quote::Tokens) {
+    let orignal_struct_name = ast.ident.clone();
     let mut struct_name = String::from("Optional");
     struct_name.push_str(&ast.ident.to_string());
-    let mut struct_name = syn::Ident::new(struct_name);
+    let mut struct_name = Ident::new(struct_name);
     let mut derives = quote!{};
 
     for attribute in &ast.attrs {
@@ -44,7 +46,7 @@ fn parse_attributes(ast: &syn::DeriveInput) -> (syn::Ident, quote::Tokens) {
 
                 match value {
                     &syn::Lit::Str(ref name_value, _) => {
-                        struct_name = syn::Ident::new(name_value.clone())
+                        struct_name = Ident::new(name_value.clone())
                     }
                     _ => panic!("optional_name should be a string"),
                 }
@@ -59,7 +61,7 @@ fn parse_attributes(ast: &syn::DeriveInput) -> (syn::Ident, quote::Tokens) {
                         &syn::NestedMetaItem::MetaItem(ref item) => {
                             match item {
                                 &syn::MetaItem::Word(ref derive_name) => {
-                                    derives = quote!{ #derives, #derive_name }
+                                    derives = quote!{ #derive_name, #derives }
                                 }
                                 _ => {
                                     panic!("Only traits name are supported inside optional_struct")
@@ -76,12 +78,13 @@ fn parse_attributes(ast: &syn::DeriveInput) -> (syn::Ident, quote::Tokens) {
     }
 
     derives = quote!{ #[derive(#derives)] };
-    (struct_name, derives)
+    (orignal_struct_name, struct_name, derives)
 }
 
 fn create_non_tuple_struct(
     fields: &Vec<Field>,
-    struct_name: syn::Ident,
+    orignal_struct_name: Ident,
+    struct_name: Ident,
     derives: quote::Tokens,
 ) -> quote::Tokens {
     let mut attributes = quote!{};
@@ -115,7 +118,7 @@ fn create_non_tuple_struct(
             #attributes
         }
 
-        impl #struct_name {
+        impl #orignal_struct_name {
             pub fn apply_options(&mut self, optional_struct: &#struct_name) {
                 #assigners 
             }
