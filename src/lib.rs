@@ -6,7 +6,6 @@ extern crate syn;
 extern crate quote;
 
 use proc_macro::TokenStream;
-use quote::Ident;
 use syn::Field;
 
 #[proc_macro_derive(OptionalStruct, attributes(optional_name, optional_derive))]
@@ -30,7 +29,9 @@ fn create_optional_struct(ast: &syn::DeriveInput) -> quote::Tokens {
 }
 
 fn parse_attributes(ast: &syn::DeriveInput) -> (syn::Ident, quote::Tokens) {
-    let mut struct_name = ast.ident.clone();
+    let mut struct_name = String::from("Optional");
+    struct_name.push_str(&ast.ident.to_string());
+    let mut struct_name = syn::Ident::new(struct_name);
     let mut derives = quote!{};
 
     for attribute in &ast.attrs {
@@ -83,11 +84,6 @@ fn create_non_tuple_struct(
     struct_name: syn::Ident,
     derives: quote::Tokens,
 ) -> quote::Tokens {
-    let struct_name_string = quote!{#struct_name}.to_string();
-    let mut optional_struct_name = String::from("Optional");
-    optional_struct_name.push_str(&struct_name_string);
-    let optional_struct_name = Ident::new(optional_struct_name);
-
     let mut attributes = quote!{};
     let mut assigners = quote!{};
     for field in fields {
@@ -115,12 +111,12 @@ fn create_non_tuple_struct(
 
     quote!{
         #derives
-        pub struct #optional_struct_name {
+        pub struct #struct_name {
             #attributes
         }
 
         impl #struct_name {
-            pub fn apply_options(&mut self, optional_struct: &#optional_struct_name) {
+            pub fn apply_options(&mut self, optional_struct: &#struct_name) {
                 #assigners 
             }
         }
