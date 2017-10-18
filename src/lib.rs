@@ -16,17 +16,71 @@ pub fn optional_struct(input: TokenStream) -> TokenStream {
 }
 
 fn create_optional_struct(ast: &syn::DeriveInput) -> quote::Tokens {
+    let (struct_name, derives) = parse_attributes(&ast);
+
     if let syn::Body::Struct(ref variant_data) = ast.body {
         if let &syn::VariantData::Struct(ref fields) = variant_data {
-            return create_non_tuple_struct(fields, &ast);
+            return create_non_tuple_struct(fields, struct_name, derives);
         }
     }
 
     panic!("OptionalStruct only supports non-tuple structs for now");
 }
 
-fn create_non_tuple_struct(fields: &Vec<Field>, ast: &syn::DeriveInput) -> quote::Tokens {
-    let struct_name = &ast.ident;
+fn parse_attributes(ast: &syn::DeriveInput) -> (syn::Ident, quote::Tokens) {
+    let mut struct_name = ast.ident.clone();
+    let mut derives = quote!{};
+
+    for attribute in &ast.attrs {
+        match &attribute.value {
+            &syn::MetaItem::Word(_) => panic!("No word attribute is supported"),
+            &syn::MetaItem::NameValue(ref name, ref value) => {
+                if name != "optional_name" {
+                    panic!("Only optional_name is supported");
+                }
+
+                match value {
+                    &syn::Lit::Str(ref name_value, _) => {
+                        struct_name = syn::Ident::new(name_value.clone())
+                    }
+                    _ => panic!("optional_name should be a string"),
+                }
+            }
+            &syn::MetaItem::List(ref name, ref values) => {
+                if name != "optional_derive" {
+                    panic!("Only optional_derive are supported");
+                }
+
+                for value in values {
+                    match value {
+                        &syn::NestedMetaItem::MetaItem(ref item) => {
+                            match item {
+                                &syn::MetaItem::Word(ref derive_name) => {
+                                    derives = quote!{ #derives, #derive_name }
+                                }
+                                _ => {
+                                    panic!("Only traits name are supported inside optional_struct")
+                                }
+                            }
+                        }
+                        &syn::NestedMetaItem::Literal(_) => {
+                            panic!("Only traits name are supported inside optional_struct")
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    derives = quote!{ #[derive(#derives)] };
+    (struct_name, derives)
+}
+
+fn create_non_tuple_struct(
+    fields: &Vec<Field>,
+    struct_name: syn::Ident,
+    derives: quote::Tokens,
+) -> quote::Tokens {
     let struct_name_string = quote!{#struct_name}.to_string();
     let mut optional_struct_name = String::from("Optional");
     optional_struct_name.push_str(&struct_name_string);
@@ -58,6 +112,7 @@ fn create_non_tuple_struct(fields: &Vec<Field>, ast: &syn::DeriveInput) -> quote
     }
 
     quote!{
+        #derives
         pub struct #optional_struct_name {
             #attributes
         }
