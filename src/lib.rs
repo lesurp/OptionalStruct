@@ -7,7 +7,7 @@ use proc_macro::TokenStream;
 use quote::Ident;
 use syn::Field;
 
-#[proc_macro_derive(OptionalStruct)]
+#[proc_macro_derive(OptionalStruct, attributes(optional_name, optional_derive))]
 pub fn optional_struct(input: TokenStream) -> TokenStream {
     let s = input.to_string();
     let ast = syn::parse_derive_input(&s).unwrap();
