@@ -31,7 +31,7 @@ fn test_apply_options() {
         log_config: OptionalLogConfig {
             log_file: Some("/tmp/bar.log".to_owned()),
             log_level: None,
-        }
+        },
     };
 
     config.apply_options(opt_config);
