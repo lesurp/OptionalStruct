@@ -5,9 +5,11 @@ extern crate syn;
 #[macro_use]
 extern crate quote;
 
+use std::collections::HashMap;
 use proc_macro::TokenStream;
 use syn::Field;
 use syn::Ident;
+use Tokens;
 
 #[proc_macro_derive(OptionalStruct, attributes(optional_name, optional_derive))]
 pub fn optional_struct(input: TokenStream) -> TokenStream {
@@ -17,36 +19,56 @@ pub fn optional_struct(input: TokenStream) -> TokenStream {
     gen.parse().unwrap()
 }
 
-fn create_optional_struct(ast: &syn::DeriveInput) -> quote::Tokens {
-    let (orignal_struct_name, struct_name, derives) = parse_attributes(&ast);
+fn create_optional_struct(ast: &syn::DeriveInput) -> Tokens {
+    let data = parse_attributes(&ast);
 
     if let syn::Body::Struct(ref variant_data) = ast.body {
         if let &syn::VariantData::Struct(ref fields) = variant_data {
-            return create_non_tuple_struct(fields, orignal_struct_name, struct_name, derives);
+            return create_non_tuple_struct(fields, data);
         }
     }
 
     panic!("OptionalStruct only supports non-tuple structs for now");
 }
 
-fn parse_attributes(ast: &syn::DeriveInput) -> (Ident, syn::Ident, quote::Tokens) {
+struct Data {
+    orignal_struct_name: Ident,
+    optional_struct_name: Ident,
+    derives: Tokens,
+    nested_names: HashMap<String, String>,
+}
+
+impl Data {
+    fn explode(self) -> (Ident, Ident, Tokens, HashMap<String, String>) {
+        (
+            self.orignal_struct_name,
+            self.optional_struct_name,
+            self.derives,
+            self.nested_names,
+        )
+    }
+}
+
+fn parse_attributes(ast: &syn::DeriveInput) -> Data {
     let orignal_struct_name = ast.ident.clone();
     let mut struct_name = String::from("Optional");
     struct_name.push_str(&ast.ident.to_string());
     let mut struct_name = Ident::new(struct_name);
     let mut derives = quote!{};
+    let mut nested_names = HashMap::new();
 
     for attribute in &ast.attrs {
         match &attribute.value {
             &syn::MetaItem::Word(_) => panic!("No word attribute is supported"),
             &syn::MetaItem::NameValue(ref name, ref value) => {
-                if name != "optional_name" {
-                    panic!("Only optional_name is supported");
-                }
-
                 match value {
                     &syn::Lit::Str(ref name_value, _) => {
-                        struct_name = Ident::new(name_value.clone())
+                        if name != "optional_name" {
+                            nested_names.insert(name.to_string(), name_value.clone());
+                        } else {
+
+                            struct_name = Ident::new(name_value.clone())
+                        }
                     }
                     _ => panic!("optional_name should be a string"),
                 }
@@ -78,15 +100,19 @@ fn parse_attributes(ast: &syn::DeriveInput) -> (Ident, syn::Ident, quote::Tokens
     }
 
     derives = quote!{ #[derive(#derives)] };
-    (orignal_struct_name, struct_name, derives)
+
+    Data {
+        orignal_struct_name: orignal_struct_name,
+        optional_struct_name: struct_name,
+        derives: derives,
+        nested_names: nested_names,
+    }
 }
 
-fn create_non_tuple_struct(
-    fields: &Vec<Field>,
-    orignal_struct_name: Ident,
-    struct_name: Ident,
-    derives: quote::Tokens,
-) -> quote::Tokens {
+fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
+
+    let (orignal_struct_name, optional_struct_name, derives, nested_names) = data.explode();
+
     let mut attributes = quote!{};
     let mut assigners = quote!{};
     for field in fields {
@@ -95,9 +121,15 @@ fn create_non_tuple_struct(
         let next_attribute;
         let next_assigner;
 
-        if field_name.to_string().starts_with("Option<") {
+        let type_name_string = quote!{#type_name}.to_string();
+
+        if type_name_string.to_string().starts_with("Option<") {
             next_attribute = quote!{ pub #field_name: #type_name>, };
             next_assigner = quote!{ self.#field_name = optional_struct.#field_name };
+        } else if nested_names.contains_key(&type_name_string) {
+            let type_name = nested_names.get(&type_name_string);
+            next_attribute = quote!{ pub #field_name: #type_name>, };
+            next_assigner = quote!{ self.#field_name.applys_options(optional_struct.#field_name) };
         } else {
             next_attribute = quote! { pub #field_name: Option<#type_name>, };
             next_assigner =
@@ -114,12 +146,12 @@ fn create_non_tuple_struct(
 
     quote!{
         #derives
-        pub struct #struct_name {
+        pub struct #optional_struct_name {
             #attributes
         }
 
         impl #orignal_struct_name {
-            pub fn apply_options(&mut self, optional_struct: &#struct_name) {
+            pub fn apply_options(&mut self, optional_struct: &#optional_struct_name) {
                 #assigners 
             }
         }
