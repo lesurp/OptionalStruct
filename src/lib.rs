@@ -99,7 +99,12 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
         }
     }
 
-    derives = quote!{ #[derive(#derives)] };
+    // prevent warnings if no derive is given
+    derives = if derives.to_string().is_empty() {
+        quote!{}
+    } else {
+        quote!{ #[derive(#derives)] }
+    };
 
     Data {
         orignal_struct_name: orignal_struct_name,
@@ -137,15 +142,15 @@ fn create_assigners_attributes(fields: &Vec<Field>, nested_names: HashMap<String
         let next_assigner;
 
         let type_name_string = quote!{#type_name}.to_string();
-        let type_name_string = type_name_string.split_whitespace().fold("".to_owned(), |mut type_name, token| {type_name.push_str(token); type_name});
+        let type_name_string: String = type_name_string.chars().filter(|&c| c != ' ').collect();
 
-        if type_name_string.to_string().starts_with("Option <") {
-            next_attribute = quote!{ pub #field_name: #type_name>, };
-            next_assigner = quote!{ self.#field_name = optional_struct.#field_name };
+        if type_name_string.starts_with("Option<") {
+            next_attribute = quote!{ pub #field_name: #type_name, };
+            next_assigner = quote!{ self.#field_name = optional_struct.#field_name; };
         } else if nested_names.contains_key(&type_name_string) {
             let type_name = Ident::new(nested_names.get(&type_name_string).unwrap().as_str());
-            next_attribute = quote!{ pub #field_name: #type_name>, };
-            next_assigner = quote!{ self.#field_name.apply_options(optional_struct.#field_name) };
+            next_attribute = quote!{ pub #field_name: #type_name, };
+            next_assigner = quote!{ self.#field_name.apply_options(optional_struct.#field_name); };
         } else {
             next_attribute = quote! { pub #field_name: Option<#type_name>, };
             next_assigner =
