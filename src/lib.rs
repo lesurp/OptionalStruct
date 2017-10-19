@@ -116,7 +116,7 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
 
 fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
     let (orignal_struct_name, optional_struct_name, derives, nested_names) = data.explode();
-    let (assigners, attributes) = create_assigners_attributes(&fields, nested_names);
+    let (assigners, attributes, empty) = generate_dynamic_assignments(&fields, nested_names);
 
     quote!{
         #derives
@@ -129,17 +129,27 @@ fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
                 #assigners 
             }
         }
+
+        impl #optional_struct_name {
+            pub fn empty() -> #optional_struct_name {
+                #optional_struct_name {
+                    #empty
+                }
+            }
+        }
     }
 }
 
-fn create_assigners_attributes(fields: &Vec<Field>, nested_names: HashMap<String, String>) -> (Tokens, Tokens) {
+fn generate_dynamic_assignments(fields: &Vec<Field>, nested_names: HashMap<String, String>) -> (Tokens, Tokens, Tokens) {
     let mut attributes = quote!{};
     let mut assigners = quote!{};
+    let mut empty = quote!{};
     for field in fields {
         let ref type_name = &field.ty;
         let ref field_name = &field.ident.clone().unwrap();
         let next_attribute;
         let next_assigner;
+        let next_empty;
 
         let type_name_string = quote!{#type_name}.to_string();
         let type_name_string: String = type_name_string.chars().filter(|&c| c != ' ').collect();
@@ -147,10 +157,12 @@ fn create_assigners_attributes(fields: &Vec<Field>, nested_names: HashMap<String
         if type_name_string.starts_with("Option<") {
             next_attribute = quote!{ pub #field_name: #type_name, };
             next_assigner = quote!{ self.#field_name = optional_struct.#field_name; };
+            next_empty = quote!{ #field_name: None, };
         } else if nested_names.contains_key(&type_name_string) {
             let type_name = Ident::new(nested_names.get(&type_name_string).unwrap().as_str());
             next_attribute = quote!{ pub #field_name: #type_name, };
             next_assigner = quote!{ self.#field_name.apply_options(optional_struct.#field_name); };
+            next_empty = quote!{ #field_name: #type_name::empty(), };
         } else {
             next_attribute = quote! { pub #field_name: Option<#type_name>, };
             next_assigner =
@@ -159,11 +171,13 @@ fn create_assigners_attributes(fields: &Vec<Field>, nested_names: HashMap<String
                         self.#field_name = attribute;
                     }
                 };
+            next_empty = quote!{ #field_name: None, };
         }
 
         assigners = quote!{ #assigners #next_assigner };
         attributes = quote!{ #attributes #next_attribute };
+        empty = quote!{ #empty #next_empty }
     }
 
-    (assigners, attributes)
+    (assigners, attributes, empty)
 }
