@@ -140,7 +140,10 @@ fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
     }
 }
 
-fn generate_dynamic_assignments(fields: &Vec<Field>, nested_names: HashMap<String, String>) -> (Tokens, Tokens, Tokens) {
+fn generate_dynamic_assignments(
+    fields: &Vec<Field>,
+    nested_names: HashMap<String, String>,
+) -> (Tokens, Tokens, Tokens) {
     let mut attributes = quote!{};
     let mut assigners = quote!{};
     let mut empty = quote!{};
