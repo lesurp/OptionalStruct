@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use proc_macro::TokenStream;
 use syn::Field;
 use syn::Ident;
-use Tokens;
+use quote::Tokens;
 
 #[proc_macro_derive(OptionalStruct, attributes(optional_name, optional_derive))]
 pub fn optional_struct(input: TokenStream) -> TokenStream {
@@ -110,9 +110,24 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
 }
 
 fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
-
     let (orignal_struct_name, optional_struct_name, derives, nested_names) = data.explode();
+    let (assigners, attributes) = create_assigners_attributes(&fields, nested_names);
 
+    quote!{
+        #derives
+        pub struct #optional_struct_name {
+            #attributes
+        }
+
+        impl #orignal_struct_name {
+            pub fn apply_options(&mut self, optional_struct: #optional_struct_name) {
+                #assigners 
+            }
+        }
+    }
+}
+
+fn create_assigners_attributes(fields: &Vec<Field>, nested_names: HashMap<String, String>) -> (Tokens, Tokens) {
     let mut attributes = quote!{};
     let mut assigners = quote!{};
     for field in fields {
@@ -122,14 +137,15 @@ fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
         let next_assigner;
 
         let type_name_string = quote!{#type_name}.to_string();
+        let type_name_string = type_name_string.split_whitespace().fold("".to_owned(), |mut type_name, token| {type_name.push_str(token); type_name});
 
-        if type_name_string.to_string().starts_with("Option<") {
+        if type_name_string.to_string().starts_with("Option <") {
             next_attribute = quote!{ pub #field_name: #type_name>, };
             next_assigner = quote!{ self.#field_name = optional_struct.#field_name };
         } else if nested_names.contains_key(&type_name_string) {
-            let type_name = nested_names.get(&type_name_string);
+            let type_name = Ident::new(nested_names.get(&type_name_string).unwrap().as_str());
             next_attribute = quote!{ pub #field_name: #type_name>, };
-            next_assigner = quote!{ self.#field_name.applys_options(optional_struct.#field_name) };
+            next_assigner = quote!{ self.#field_name.apply_options(optional_struct.#field_name) };
         } else {
             next_attribute = quote! { pub #field_name: Option<#type_name>, };
             next_assigner =
@@ -144,26 +160,5 @@ fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
         attributes = quote!{ #attributes #next_attribute };
     }
 
-    quote!{
-        #derives
-        pub struct #optional_struct_name {
-            #attributes
-        }
-
-        impl #orignal_struct_name {
-            pub fn apply_options(&mut self, optional_struct: &#optional_struct_name) {
-                #assigners 
-            }
-        }
-    }
-}
-
-
-#[cfg(test)]
-mod tests {
-
-    #[test]
-    fn it_works() {
-        assert_eq!(2 + 2, 4);
-    }
+    (assigners, attributes)
 }
