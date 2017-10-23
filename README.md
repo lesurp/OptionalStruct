@@ -1,6 +1,6 @@
 # OptionalStruct
 
-## How to use
+## Goal
 
 This crate allows the user to generate a structure containing the same fields as the original struct but wrapped in Option<T>.
 A method is also implemented for the original struct, `apply_options`. It consumes the generated optional_struct, and for every Some(x) field, it assigns the original structure's value with the optional_struct one.
@@ -82,7 +82,8 @@ conf.apply_options(user_conf);
 * You can also nest your generated struct by mapping the original types to their new names:
 ```rust
 #[derive(OptionalStruct)]
-#[LogConfig = "OptionalLogConfig"]
+#[opt_nested_original(LogConfig)]
+#[opt_nested_generated(OptionalLogConfig)]
 struct Config {
     timeout: Option<u32>,
     log_config: LogConfig,
