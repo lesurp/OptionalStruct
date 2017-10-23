@@ -1,11 +1,13 @@
 [package]
 name = "optional_struct"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Paul Lesur <paul.lesur@plesur.fr>"]
 description = "Crate defining a macro that will generate, from a structure, another structure with only Option<T> fields"
 readme = "README.md"
 categories = ["config"]
 license = "Apache-2.0"
+
+travis-ci = { repository = "https://github.com/pLesur/OptionalStruct", branch = "stable_channel" }
 
 [dependencies]
 syn = "0.11.11"
