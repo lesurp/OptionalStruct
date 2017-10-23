@@ -4,7 +4,8 @@
 extern crate optional_struct;
 
 #[derive(OptionalStruct)]
-#[LogConfig = "OptionalLogConfig"]
+#[opt_nested_original(LogConfig)]
+#[opt_nested_generated(OptionalLogConfig)]
 struct Config {
     timeout: Option<u32>,
     log_config: LogConfig,
