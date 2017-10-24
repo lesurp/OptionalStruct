@@ -1,4 +1,6 @@
 # OptionalStruct
+[![Build Status](https://travis-ci.org/pLesur/OptionalStruct.svg?branch=stable_channel)](https://travis-ci.org/pLesur/OptionalStruct)
+[![Crates.io][https://img.shields.io/crates/v/optional_struct.svg]][https://crates.io/crates/optional_struct]
 
 ## Goal
 
