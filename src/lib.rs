@@ -5,11 +5,12 @@ extern crate syn;
 #[macro_use]
 extern crate quote;
 
-use std::collections::HashMap;
 use proc_macro::TokenStream;
-use syn::Field;
-use syn::Ident;
 use quote::Tokens;
+use std::collections::HashMap;
+use syn::Field;
+use syn::Generics;
+use syn::Ident;
 
 #[proc_macro_derive(OptionalStruct, attributes(optional_name, optional_derive))]
 pub fn optional_struct(input: TokenStream) -> TokenStream {
@@ -24,7 +25,7 @@ fn create_optional_struct(ast: &syn::DeriveInput) -> Tokens {
 
     if let syn::Body::Struct(ref variant_data) = ast.body {
         if let &syn::VariantData::Struct(ref fields) = variant_data {
-            return create_non_tuple_struct(fields, data);
+            return create_non_tuple_struct(fields, data, &ast.generics);
         }
     }
 
@@ -60,19 +61,16 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
     for attribute in &ast.attrs {
         match &attribute.value {
             &syn::MetaItem::Word(_) => panic!("No word attribute is supported"),
-            &syn::MetaItem::NameValue(ref name, ref value) => {
-                match value {
-                    &syn::Lit::Str(ref name_value, _) => {
-                        if name != "optional_name" {
-                            nested_names.insert(name.to_string(), name_value.clone());
-                        } else {
-
-                            struct_name = Ident::new(name_value.clone())
-                        }
+            &syn::MetaItem::NameValue(ref name, ref value) => match value {
+                &syn::Lit::Str(ref name_value, _) => {
+                    if name != "optional_name" {
+                        nested_names.insert(name.to_string(), name_value.clone());
+                    } else {
+                        struct_name = Ident::new(name_value.clone());
                     }
-                    _ => panic!("optional_name should be a string"),
                 }
-            }
+                _ => panic!("optional_name should be a string"),
+            },
             &syn::MetaItem::List(ref name, ref values) => {
                 if name != "optional_derive" {
                     panic!("Only optional_derive are supported");
@@ -80,16 +78,12 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
 
                 for value in values {
                     match value {
-                        &syn::NestedMetaItem::MetaItem(ref item) => {
-                            match item {
-                                &syn::MetaItem::Word(ref derive_name) => {
-                                    derives = quote!{ #derive_name, #derives }
-                                }
-                                _ => {
-                                    panic!("Only traits name are supported inside optional_struct")
-                                }
+                        &syn::NestedMetaItem::MetaItem(ref item) => match item {
+                            &syn::MetaItem::Word(ref derive_name) => {
+                                derives = quote!{ #derive_name, #derives }
                             }
-                        }
+                            _ => panic!("Only traits name are supported inside optional_struct"),
+                        },
                         &syn::NestedMetaItem::Literal(_) => {
                             panic!("Only traits name are supported inside optional_struct")
                         }
@@ -114,24 +108,26 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
     }
 }
 
-fn create_non_tuple_struct(fields: &Vec<Field>, data: Data) -> Tokens {
+fn create_non_tuple_struct(fields: &Vec<Field>, data: Data, generics: &Generics) -> Tokens {
     let (orignal_struct_name, optional_struct_name, derives, nested_names) = data.explode();
     let (assigners, attributes, empty) = generate_dynamic_assignments(&fields, nested_names);
 
+    let (_, generics_no_where, _) = generics.split_for_impl();
+
     quote!{
         #derives
-        pub struct #optional_struct_name {
+        pub struct #optional_struct_name #generics {
             #attributes
         }
 
-        impl #orignal_struct_name {
-            pub fn apply_options(&mut self, optional_struct: #optional_struct_name) {
-                #assigners 
+        impl #generics #orignal_struct_name #generics_no_where {
+            pub fn apply_options(&mut self, optional_struct: #optional_struct_name #generics_no_where) {
+                #assigners
             }
         }
 
-        impl #optional_struct_name {
-            pub fn empty() -> #optional_struct_name {
+        impl #generics #optional_struct_name #generics_no_where {
+            pub fn empty() -> #optional_struct_name #generics_no_where {
                 #optional_struct_name {
                     #empty
                 }
@@ -168,12 +164,11 @@ fn generate_dynamic_assignments(
             next_empty = quote!{ #field_name: #type_name::empty(), };
         } else {
             next_attribute = quote! { pub #field_name: Option<#type_name>, };
-            next_assigner =
-                quote!{
-                    if let Some(attribute) = optional_struct.#field_name {
-                        self.#field_name = attribute;
-                    }
-                };
+            next_assigner = quote!{
+                if let Some(attribute) = optional_struct.#field_name {
+                    self.#field_name = attribute;
+                }
+            };
             next_empty = quote!{ #field_name: None, };
         }
 
