@@ -1,6 +1,6 @@
 [package]
 name = "optional_struct"
-version = "0.1.3"
+version = "0.2.0"
 authors = ["Paul Lesur <paul.lesur@plesur.fr>"]
 description = """
 Crate defining a macro that will generate, from a structure, another structure with only Option<T> fields
@@ -13,7 +13,7 @@ repository = "https://github.com/pLesur/OptionalStruct"
 exclude = [".travis.yml"]
 
 [badges]
-travis-ci = { repository = "pLesur/OptionalStruct", branch = "stable_channel" }
+travis-ci = { repository = "pLesur/OptionalStruct", branch = "master" }
 
 [dependencies]
 syn = "0.11.11"
