@@ -98,4 +98,56 @@ struct LogConfig {
 }
 ```
 
-You'll find some examples in the tests folder (yes I know).
+To have multiple nested types, just include each one as a pair in order:
+```rust
+#[derive(OptionalStruct)]
+#[opt_nested_original(LogConfig)]
+#[opt_nested_generated(OptionalLogConfig)]
+#[opt_nested_original(PathConfig)]
+#[opt_nested_generated(OptionalPathConfig)]
+struct Config {
+    timeout: Option<u32>,
+    log_config: LogConfig,
+	path_config: PathConfig,
+}
+
+#[derive(OptionalStruct)]
+struct LogConfig {
+    log_file: String,
+    log_level: usize,
+}
+
+#[derive(OptionalStruct)]
+struct PathConfig {
+    root_dir: String,
+}
+```
+
+By default, the nested structures will not be optional themselves. To make those
+optional, use the follow:
+```rust
+#[derive(OptionalStruct)]
+#[opt_nested_optional = true]
+#[opt_nested_original(LogConfig)]
+#[opt_nested_generated(OptionalLogConfig)]
+struct Config {
+    timeout: Option<u32>,
+    log_config: LogConfig,
+}
+
+#[derive(OptionalStruct)]
+struct LogConfig {
+    log_file: String,
+    log_level: usize,
+}
+```
+
+This will generate:
+```rust
+struct OptionalConfig {
+    timeout: Option<u32>,
+    log_config: Option<LogConfig>,
+}
+```
+
+You'll find some additional examples in the tests folder (yes, I know).

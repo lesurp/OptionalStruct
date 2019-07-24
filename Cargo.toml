@@ -19,6 +19,10 @@ travis-ci = { repository = "pLesur/OptionalStruct", branch = "master" }
 syn = "0.11.11"
 quote = "0.3"
 
+[dev-dependencies]
+serde_yaml = "0.8.9"
+serde = { version = "1.0.97", features = ["derive"] }
+
 [lib]
 proc-macro = true
 

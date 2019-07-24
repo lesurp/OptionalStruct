@@ -17,7 +17,8 @@ use syn::Lit;
         optional_name,
         optional_derive,
         opt_nested_original,
-        opt_nested_generated
+        opt_nested_generated,
+        opt_nested_optional
     )
 )]
 pub fn optional_struct(input: TokenStream) -> TokenStream {
@@ -44,15 +45,17 @@ struct Data {
     optional_struct_name: Ident,
     derives: Tokens,
     nested_names: HashMap<String, String>,
+    nested_optional: bool,
 }
 
 impl Data {
-    fn explode(self) -> (Ident, Ident, Tokens, HashMap<String, String>) {
+    fn explode(self) -> (Ident, Ident, Tokens, HashMap<String, String>, bool) {
         (
             self.orignal_struct_name,
             self.optional_struct_name,
             self.derives,
             self.nested_names,
+            self.nested_optional,
         )
     }
 }
@@ -113,20 +116,28 @@ fn handle_list(
                 nested_original.push(original_nested_name.clone());
             }
         }
-        _ => panic!("Only optional_derive are supported"),
+        _ => { /* Allow other attributes */ }
     };
 }
 
-fn handle_name_value(name: &Ident, value: &Lit, struct_name: &mut Ident) {
+fn handle_name_value(
+    name: &Ident,
+    value: &Lit,
+    struct_name: &mut Ident,
+    opt_nested_optional: &mut bool,
+) {
     match value {
         &Lit::Str(ref name_value, _) => {
             if name == "optional_name" {
                 *struct_name = Ident::new(name_value.clone())
-            } else {
-                panic!("Only optional_name is supported");
             }
         }
-        _ => panic!("optional_name should be a string"),
+        &Lit::Bool(ref flag_value) => {
+            if name == "opt_nested_optional" {
+                *opt_nested_optional = *flag_value
+            }
+        }
+        _ => { /* Allow other values outside of our package */ }
     }
 }
 
@@ -138,12 +149,13 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
     let mut derives = quote! {};
     let mut nested_generated = Vec::new();
     let mut nested_original = Vec::new();
+    let mut opt_nested_optional = false;
 
     for attribute in &ast.attrs {
         match &attribute.value {
             &syn::MetaItem::Word(_) => panic!("No word attribute is supported"),
             &syn::MetaItem::NameValue(ref name, ref value) => {
-                handle_name_value(name, value, &mut struct_name)
+                handle_name_value(name, value, &mut struct_name, &mut opt_nested_optional)
             }
             &syn::MetaItem::List(ref name, ref values) => handle_list(
                 name,
@@ -167,12 +179,14 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
         optional_struct_name: struct_name,
         derives: derives,
         nested_names: create_nested_names_map(nested_original, nested_generated),
+        nested_optional: opt_nested_optional,
     }
 }
 
 fn create_struct(fields: &Vec<Field>, data: Data, generics: &Generics) -> Tokens {
-    let (orignal_struct_name, optional_struct_name, derives, nested_names) = data.explode();
-    let (assigners, attributes, empty) = create_fields(&fields, nested_names);
+    let (orignal_struct_name, optional_struct_name, derives, nested_names, nested_optional) =
+        data.explode();
+    let (assigners, attributes, empty) = create_fields(&fields, nested_names, nested_optional);
 
     let (_, generics_no_where, _) = generics.split_for_impl();
 
@@ -201,6 +215,7 @@ fn create_struct(fields: &Vec<Field>, data: Data, generics: &Generics) -> Tokens
 fn create_fields(
     fields: &Vec<Field>,
     nested_names: HashMap<String, String>,
+    nested_optional: bool,
 ) -> (Tokens, Tokens, Tokens) {
     let mut attributes = quote! {};
     let mut assigners = quote! {};
@@ -221,9 +236,22 @@ fn create_fields(
             next_empty = quote! { #field_name: None, };
         } else if nested_names.contains_key(&type_name_string) {
             let type_name = Ident::new(nested_names.get(&type_name_string).unwrap().as_str());
-            next_attribute = quote! { pub #field_name: #type_name, };
-            next_assigner = quote! { self.#field_name.apply_options(optional_struct.#field_name); };
-            next_empty = quote! { #field_name: #type_name::empty(), };
+
+            if nested_optional {
+                next_attribute = quote! { pub #field_name: Option<#type_name>, };
+                next_assigner = quote! {
+                    if let Some(nested) = optional_struct.#field_name {
+                        self.#field_name.apply_options(nested);
+                    }
+
+                };
+                next_empty = quote! { #field_name: None, };
+            } else {
+                next_attribute = quote! { pub #field_name: #type_name, };
+                next_assigner =
+                    quote! { self.#field_name.apply_options(optional_struct.#field_name); };
+                next_empty = quote! { #field_name: #type_name::empty(), };
+            }
         } else {
             next_attribute = quote! { pub #field_name: Option<#type_name>, };
             next_assigner = quote! {
