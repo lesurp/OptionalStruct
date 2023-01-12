@@ -1,15 +1,184 @@
-extern crate proc_macro;
-extern crate syn;
-#[macro_use]
-extern crate quote;
+use syn::{
+    parse_macro_input, AttributeArgs, Data, DeriveInput, Fields, Ident, Meta, NestedMeta, Path,
+    Type,
+};
 
-use proc_macro::TokenStream;
-use quote::Tokens;
-use std::collections::HashMap;
-use syn::Field;
-use syn::Generics;
-use syn::Ident;
-use syn::Lit;
+use quote::{format_ident, quote};
+
+fn is_path_option(p: &Path) -> bool {
+    p.segments
+        .last()
+        .map(|ps| ps.ident == "Option")
+        .unwrap_or(false)
+}
+
+fn is_type_option(t: &Type) -> bool {
+    macro_rules! wtf {
+        ($reason : tt) => {
+            panic!(
+                "Using OptionalStruct for a struct containing a {} is dubious...",
+                $reason
+            )
+        };
+    }
+
+    match &t {
+        // real work
+        Type::Path(type_path) => is_path_option(&type_path.path),
+        Type::Array(_) | Type::Tuple(_) => false,
+        Type::Paren(type_paren) => is_type_option(&type_paren.elem),
+
+        // No clue what to do with those
+        Type::ImplTrait(_) | Type::TraitObject(_) => {
+            panic!("Might already be an option I have no way to tell :/")
+        }
+        Type::Infer(_) => panic!("If you cannot tell, neither can I"),
+        Type::Macro(_) => panic!("Don't think I can handle this easily..."),
+
+        // Makes no sense to use those in an OptionalStruct
+        Type::Reference(_) => wtf!("reference"),
+        Type::Never(_) => wtf!("never-type"),
+        Type::Slice(_) => wtf!("slice"),
+        Type::Ptr(_) => wtf!("pointer"),
+        Type::BareFn(_) => wtf!("function pointer"),
+
+        // Help
+        Type::Verbatim(_) | Type::Group(_) => todo!("Didn't get what this was supposed to be..."),
+
+        // Have to wildcard here but I don't want to (unneeded as long as syn doesn't break semver
+        // anyway)
+        _ => panic!("Open an issue please :)"),
+    }
+}
+
+fn get_optional_struct_name(attr: &AttributeArgs) -> Option<String> {
+    attr.iter()
+        .filter_map(|ns| {
+            if let NestedMeta::Meta(m) = ns {
+                Some(m)
+            } else {
+                None
+            }
+        })
+        .filter_map(|m| match m {
+            Meta::Path(p) => Some(p),
+            Meta::NameValue(_) | Meta::List(_) => None,
+        })
+        .map(|p| {
+            p.segments
+                .last()
+                .expect("How can we have an empty path here?")
+                .ident
+                .to_string()
+        })
+        .next()
+}
+
+fn set_new_struct_name(attr: &AttributeArgs, new_struct: &mut DeriveInput) {
+    let new_struct_name = get_optional_struct_name(attr)
+        .unwrap_or_else(|| "Optional".to_owned() + &new_struct.ident.to_string());
+
+    new_struct.ident = Ident::new(&new_struct_name, new_struct.ident.span());
+}
+
+fn set_new_struct_fields(new_struct: &mut DeriveInput) {
+    let data_struct = match &mut new_struct.data {
+        Data::Struct(data_struct) => data_struct,
+        _ => panic!("OptionalStruct only works for structs :)"),
+    };
+
+    let fields = match &mut data_struct.fields {
+        Fields::Unnamed(f) => &mut f.unnamed,
+        Fields::Named(f) => &mut f.named,
+        Fields::Unit => unreachable!("A struct cannot have simply a unit field?"),
+    };
+
+    for field in fields {
+        if !is_type_option(&field.ty) {
+            // required because quote chokes on #a.b
+            let t = &field.ty;
+            field.ty = Type::Verbatim(quote! { Option<#t> });
+        }
+    }
+}
+
+fn acc_assigning<T: std::iter::Iterator<Item = U>, U: std::borrow::Borrow<Ident>>(
+    idents: T,
+) -> proc_macro2::TokenStream {
+    let mut acc = quote! {};
+    for field in idents {
+        let field = field.borrow();
+        acc = quote! {
+            #acc
+            if let Some(val) = o.#field {
+                // TODO: check if self.#field is not an option too!
+                self.#field = val;
+            }
+        };
+    }
+    acc
+}
+
+fn generate_apply_fn(
+    derive_input: &DeriveInput,
+    new_struct: &DeriveInput,
+) -> proc_macro2::TokenStream {
+    let orig_name = &derive_input.ident;
+    let new_name = &new_struct.ident;
+
+    let fields = match &derive_input.data {
+        Data::Struct(s) => &s.fields,
+        _ => unreachable!(),
+    };
+
+    let acc = match &fields {
+        Fields::Unit => unreachable!(),
+        Fields::Named(fields_named) => {
+            let it = fields_named.named.iter().map(|f| f.ident.as_ref().unwrap());
+            acc_assigning(it)
+        }
+        Fields::Unnamed(fields_unnamed) => {
+            let it = fields_unnamed
+                .unnamed
+                .iter()
+                .enumerate()
+                .map(|(i, _)| format_ident!("{i}"));
+            acc_assigning(it)
+        }
+    };
+
+    quote! {
+        impl #orig_name {
+            pub fn apply_options(&mut self, o: &#new_name) {
+                #acc
+            }
+        }
+    }
+}
+
+#[proc_macro_attribute]
+pub fn optional_struct(
+    attr: proc_macro::TokenStream,
+    input: proc_macro::TokenStream,
+) -> proc_macro::TokenStream {
+    let attr = parse_macro_input!(attr as AttributeArgs);
+    let derive_input = parse_macro_input!(input as DeriveInput);
+    let mut new_struct = derive_input.clone();
+
+    set_new_struct_name(&attr, &mut new_struct);
+    set_new_struct_fields(&mut new_struct);
+    let apply_fn_impl = generate_apply_fn(&derive_input, &new_struct);
+
+    let output = quote! {
+        #derive_input
+
+        #[derive(Default, Clone, PartialEq)]
+        #new_struct
+
+        #apply_fn_impl
+    };
+    proc_macro::TokenStream::from(output)
+}
 
 #[proc_macro_derive(
     OptionalStruct,
@@ -20,224 +189,6 @@ use syn::Lit;
         opt_nested_generated
     )
 )]
-pub fn optional_struct(input: TokenStream) -> TokenStream {
-    let s = input.to_string();
-    let ast = syn::parse_derive_input(&s).unwrap();
-    let gen = generate_optional_struct(&ast);
-    gen.parse().unwrap()
-}
-
-fn generate_optional_struct(ast: &syn::DeriveInput) -> Tokens {
-    let data = parse_attributes(&ast);
-
-    if let syn::Body::Struct(ref variant_data) = ast.body {
-        if let &syn::VariantData::Struct(ref fields) = variant_data {
-            return create_struct(fields, data, &ast.generics);
-        }
-    }
-
-    panic!("OptionalStruct only supports non-tuple structs for now");
-}
-
-struct Data {
-    orignal_struct_name: Ident,
-    optional_struct_name: Ident,
-    derives: Tokens,
-    nested_names: HashMap<String, String>,
-}
-
-impl Data {
-    fn explode(self) -> (Ident, Ident, Tokens, HashMap<String, String>) {
-        (
-            self.orignal_struct_name,
-            self.optional_struct_name,
-            self.derives,
-            self.nested_names,
-        )
-    }
-}
-
-fn nested_meta_item_to_ident(nested_item: &syn::NestedMetaItem) -> &Ident {
-    match nested_item {
-        &syn::NestedMetaItem::MetaItem(ref item) => match item {
-            &syn::MetaItem::Word(ref ident) => ident,
-            _ => panic!("Only traits name are supported inside optional_struct"),
-        },
-        &syn::NestedMetaItem::Literal(_) => {
-            panic!("Only traits name are supported inside optional_struct")
-        }
-    }
-}
-
-fn create_nested_names_map(orig: Vec<Ident>, gen: Vec<Ident>) -> HashMap<String, String> {
-    let mut map = HashMap::new();
-
-    let orig_gen = orig.iter().zip(gen);
-
-    for (orig, gen) in orig_gen {
-        if gen.to_string().is_empty() {
-            map.insert(orig.to_string(), "Optional".to_owned() + &gen.to_string());
-        } else {
-            map.insert(orig.to_string(), gen.to_string());
-        }
-    }
-
-    map
-}
-
-fn handle_list(
-    name: &Ident,
-    values: &Vec<syn::NestedMetaItem>,
-    nested_original: &mut Vec<Ident>,
-    nested_generated: &mut Vec<Ident>,
-    derives: &mut Tokens,
-) {
-    match name.to_string().as_str() {
-        "optional_derive" => {
-            let mut derives_local = quote! {};
-            for value in values {
-                let derive_ident = nested_meta_item_to_ident(value);
-                derives_local = quote! { #derive_ident, #derives_local }
-            }
-            *derives = derives_local;
-        }
-        "opt_nested_generated" => {
-            for value in values {
-                let generated_nested_name = nested_meta_item_to_ident(value);
-                nested_generated.push(generated_nested_name.clone());
-            }
-        }
-        "opt_nested_original" => {
-            for value in values {
-                let original_nested_name = nested_meta_item_to_ident(value);
-                nested_original.push(original_nested_name.clone());
-            }
-        }
-        _ => panic!("Only optional_derive are supported"),
-    };
-}
-
-fn handle_name_value(name: &Ident, value: &Lit, struct_name: &mut Ident) {
-    match value {
-        &Lit::Str(ref name_value, _) => {
-            if name == "optional_name" {
-                *struct_name = Ident::new(name_value.clone())
-            } else {
-                panic!("Only optional_name is supported");
-            }
-        }
-        _ => panic!("optional_name should be a string"),
-    }
-}
-
-fn parse_attributes(ast: &syn::DeriveInput) -> Data {
-    let orignal_struct_name = ast.ident.clone();
-    let mut struct_name = String::from("Optional");
-    struct_name.push_str(&ast.ident.to_string());
-    let mut struct_name = Ident::new(struct_name);
-    let mut derives = quote! {};
-    let mut nested_generated = Vec::new();
-    let mut nested_original = Vec::new();
-
-    for attribute in &ast.attrs {
-        match &attribute.value {
-            &syn::MetaItem::Word(_) => panic!("No word attribute is supported"),
-            &syn::MetaItem::NameValue(ref name, ref value) => {
-                handle_name_value(name, value, &mut struct_name)
-            }
-            &syn::MetaItem::List(ref name, ref values) => handle_list(
-                name,
-                values,
-                &mut nested_original,
-                &mut nested_generated,
-                &mut derives,
-            ),
-        }
-    }
-
-    // prevent warnings if no derive is given
-    derives = if derives.to_string().is_empty() {
-        quote! {}
-    } else {
-        quote! { #[derive(#derives)] }
-    };
-
-    Data {
-        orignal_struct_name: orignal_struct_name,
-        optional_struct_name: struct_name,
-        derives: derives,
-        nested_names: create_nested_names_map(nested_original, nested_generated),
-    }
-}
-
-fn create_struct(fields: &Vec<Field>, data: Data, generics: &Generics) -> Tokens {
-    let (orignal_struct_name, optional_struct_name, derives, nested_names) = data.explode();
-    let (assigners, attributes, empty) = create_fields(&fields, nested_names);
-
-    let (_, generics_no_where, _) = generics.split_for_impl();
-
-    quote! {
-        #derives
-        pub struct #optional_struct_name #generics {
-            #attributes
-        }
-
-        impl #generics #orignal_struct_name #generics_no_where {
-            pub fn apply_options(&mut self, optional_struct: #optional_struct_name #generics_no_where) {
-                #assigners
-            }
-        }
-
-        impl #generics #optional_struct_name #generics_no_where {
-            pub fn empty() -> #optional_struct_name #generics_no_where {
-                #optional_struct_name {
-                    #empty
-                }
-            }
-        }
-    }
-}
-
-fn create_fields(
-    fields: &Vec<Field>,
-    nested_names: HashMap<String, String>,
-) -> (Tokens, Tokens, Tokens) {
-    let mut attributes = quote! {};
-    let mut assigners = quote! {};
-    let mut empty = quote! {};
-    for field in fields {
-        let ref type_name = &field.ty;
-        let ref field_name = &field.ident.clone().unwrap();
-        let next_attribute;
-        let next_assigner;
-        let next_empty;
-
-        let type_name_string = quote! {#type_name}.to_string();
-        let type_name_string: String = type_name_string.chars().filter(|&c| c != ' ').collect();
-
-        if type_name_string.starts_with("Option<") {
-            next_attribute = quote! { pub #field_name: #type_name, };
-            next_assigner = quote! { self.#field_name = optional_struct.#field_name; };
-            next_empty = quote! { #field_name: None, };
-        } else if nested_names.contains_key(&type_name_string) {
-            let type_name = Ident::new(nested_names.get(&type_name_string).unwrap().as_str());
-            next_attribute = quote! { pub #field_name: #type_name, };
-            next_assigner = quote! { self.#field_name.apply_options(optional_struct.#field_name); };
-            next_empty = quote! { #field_name: #type_name::empty(), };
-        } else {
-            next_attribute = quote! { pub #field_name: Option<#type_name>, };
-            next_assigner = quote! {
-                if let Some(attribute) = optional_struct.#field_name {
-                    self.#field_name = attribute;
-                }
-            };
-            next_empty = quote! { #field_name: None, };
-        }
-
-        assigners = quote! { #assigners #next_assigner };
-        attributes = quote! { #attributes #next_attribute };
-        empty = quote! { #empty #next_empty }
-    }
-
-    (assigners, attributes, empty)
+pub fn optional_struct_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
+    optional_struct(proc_macro::TokenStream::new(), input)
 }
