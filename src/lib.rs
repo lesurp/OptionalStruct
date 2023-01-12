@@ -13,7 +13,12 @@ use syn::Lit;
 
 #[proc_macro_derive(
     OptionalStruct,
-    attributes(optional_name, optional_derive, opt_nested_original, opt_nested_generated)
+    attributes(
+        optional_name,
+        optional_derive,
+        opt_nested_original,
+        opt_nested_generated
+    )
 )]
 pub fn optional_struct(input: TokenStream) -> TokenStream {
     let s = input.to_string();
@@ -89,10 +94,10 @@ fn handle_list(
 ) {
     match name.to_string().as_str() {
         "optional_derive" => {
-            let mut derives_local = quote!{};
+            let mut derives_local = quote! {};
             for value in values {
                 let derive_ident = nested_meta_item_to_ident(value);
-                derives_local = quote!{ #derive_ident, #derives_local }
+                derives_local = quote! { #derive_ident, #derives_local }
             }
             *derives = derives_local;
         }
@@ -130,7 +135,7 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
     let mut struct_name = String::from("Optional");
     struct_name.push_str(&ast.ident.to_string());
     let mut struct_name = Ident::new(struct_name);
-    let mut derives = quote!{};
+    let mut derives = quote! {};
     let mut nested_generated = Vec::new();
     let mut nested_original = Vec::new();
 
@@ -152,9 +157,9 @@ fn parse_attributes(ast: &syn::DeriveInput) -> Data {
 
     // prevent warnings if no derive is given
     derives = if derives.to_string().is_empty() {
-        quote!{}
+        quote! {}
     } else {
-        quote!{ #[derive(#derives)] }
+        quote! { #[derive(#derives)] }
     };
 
     Data {
@@ -171,7 +176,7 @@ fn create_struct(fields: &Vec<Field>, data: Data, generics: &Generics) -> Tokens
 
     let (_, generics_no_where, _) = generics.split_for_impl();
 
-    quote!{
+    quote! {
         #derives
         pub struct #optional_struct_name #generics {
             #attributes
@@ -197,9 +202,9 @@ fn create_fields(
     fields: &Vec<Field>,
     nested_names: HashMap<String, String>,
 ) -> (Tokens, Tokens, Tokens) {
-    let mut attributes = quote!{};
-    let mut assigners = quote!{};
-    let mut empty = quote!{};
+    let mut attributes = quote! {};
+    let mut assigners = quote! {};
+    let mut empty = quote! {};
     for field in fields {
         let ref type_name = &field.ty;
         let ref field_name = &field.ident.clone().unwrap();
@@ -207,31 +212,31 @@ fn create_fields(
         let next_assigner;
         let next_empty;
 
-        let type_name_string = quote!{#type_name}.to_string();
+        let type_name_string = quote! {#type_name}.to_string();
         let type_name_string: String = type_name_string.chars().filter(|&c| c != ' ').collect();
 
         if type_name_string.starts_with("Option<") {
-            next_attribute = quote!{ pub #field_name: #type_name, };
-            next_assigner = quote!{ self.#field_name = optional_struct.#field_name; };
-            next_empty = quote!{ #field_name: None, };
+            next_attribute = quote! { pub #field_name: #type_name, };
+            next_assigner = quote! { self.#field_name = optional_struct.#field_name; };
+            next_empty = quote! { #field_name: None, };
         } else if nested_names.contains_key(&type_name_string) {
             let type_name = Ident::new(nested_names.get(&type_name_string).unwrap().as_str());
-            next_attribute = quote!{ pub #field_name: #type_name, };
-            next_assigner = quote!{ self.#field_name.apply_options(optional_struct.#field_name); };
-            next_empty = quote!{ #field_name: #type_name::empty(), };
+            next_attribute = quote! { pub #field_name: #type_name, };
+            next_assigner = quote! { self.#field_name.apply_options(optional_struct.#field_name); };
+            next_empty = quote! { #field_name: #type_name::empty(), };
         } else {
             next_attribute = quote! { pub #field_name: Option<#type_name>, };
-            next_assigner = quote!{
+            next_assigner = quote! {
                 if let Some(attribute) = optional_struct.#field_name {
                     self.#field_name = attribute;
                 }
             };
-            next_empty = quote!{ #field_name: None, };
+            next_empty = quote! { #field_name: None, };
         }
 
-        assigners = quote!{ #assigners #next_assigner };
-        attributes = quote!{ #attributes #next_attribute };
-        empty = quote!{ #empty #next_empty }
+        assigners = quote! { #assigners #next_assigner };
+        attributes = quote! { #attributes #next_attribute };
+        empty = quote! { #empty #next_empty }
     }
 
     (assigners, attributes, empty)
