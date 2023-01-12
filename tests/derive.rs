@@ -1,8 +1,7 @@
 #[macro_use]
 extern crate optional_struct;
 
-#[derive(OptionalStruct)]
-#[optional_derive(Debug, Clone, PartialEq)]
+#[optional_struct]
 struct Config {
     delay: Option<u32>,
     path: String,
