@@ -1,7 +1,7 @@
 [package]
 name = "optional_struct"
-version = "0.2.0"
-authors = ["Paul Lesur <paul.lesur@plesur.fr>"]
+version = "0.3.0"
+authors = ["Paul Lesur <github@lesurp.fr>"]
 description = """
 Crate defining a macro that will generate, from a structure, another structure with only Option<T> fields
 """
@@ -9,17 +9,16 @@ readme = "README.md"
 categories = ["config"]
 keywords = ["macro", "configuration"]
 license = "Apache-2.0"
-repository = "https://github.com/pLesur/OptionalStruct"
+repository = "https://github.com/lesurp/OptionalStruct"
 exclude = [".travis.yml"]
+edition = '2021'
 
 [badges]
-travis-ci = { repository = "pLesur/OptionalStruct", branch = "master" }
+travis-ci = { repository = "lesurp/OptionalStruct", branch = "master" }
 
 [dependencies]
-syn = "0.11.11"
-quote = "0.3"
+syn = "1.0.107"
+quote = "1.0"
 
 [lib]
 proc-macro = true
-
-
