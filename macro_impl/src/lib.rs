@@ -51,39 +51,68 @@ fn is_type_option(t: &Type) -> bool {
     }
 }
 
-fn get_optional_struct_name(attr: &AttributeArgs) -> Option<String> {
-    attr.iter()
-        .filter_map(|ns| {
-            if let NestedMeta::Meta(m) = ns {
-                Some(m)
-            } else {
-                None
-            }
-        })
-        .filter_map(|m| match m {
-            Meta::Path(p) => Some(p),
-            Meta::NameValue(_) | Meta::List(_) => None,
-        })
-        .map(|p| {
-            p.segments
-                .last()
-                .expect("How can we have an empty path here?")
-                .ident
-                .to_string()
-        })
-        .next()
+struct GlobalAttributes {
+    new_struct_name: Option<String>,
+    default_wrapping_behavior: bool,
 }
 
-fn set_new_struct_name(attr: &AttributeArgs, new_struct: &mut DeriveInput) {
-    let new_struct_name = get_optional_struct_name(attr)
-        .unwrap_or_else(|| "Optional".to_owned() + &new_struct.ident.to_string());
+impl GlobalAttributes {
+    // TODO: should use named arguments
+    fn new(attr: &AttributeArgs) -> Self {
+        let new_struct_name = attr.get(0).map(GlobalAttributes::get_new_name);
+        let default_wrapping_behavior = attr
+            .get(1)
+            .map(GlobalAttributes::get_wrapping)
+            .unwrap_or(true);
+        GlobalAttributes {
+            new_struct_name,
+            default_wrapping_behavior,
+        }
+    }
+
+    fn get_new_name(ns: &NestedMeta) -> String {
+        let m = if let NestedMeta::Meta(m) = ns {
+            m
+        } else {
+            panic!("Only NestedMeta are accepted");
+        };
+        let p = match m {
+            Meta::Path(p) => p,
+            Meta::NameValue(_) | Meta::List(_) => {
+                panic!("Expecting a path for first argument of 'optional_struct'")
+            }
+        };
+        p.segments
+            .last()
+            .expect("How can we have an empty path here?")
+            .ident
+            .to_string()
+    }
+
+    fn get_wrapping(ns: &NestedMeta) -> bool {
+        let lit = if let NestedMeta::Lit(lit) = ns {
+            lit
+        } else {
+            panic!("Only literal booleans are accepted for 2nd argument of 'optional_struct'");
+        };
+        match lit {
+            syn::Lit::Bool(lb) => lb.value,
+            _ => panic!("Only literal booleans are accepted for 2nd argument of 'optional_struct'"),
+        }
+    }
+}
+
+fn set_new_struct_name(new_name: Option<String>, new_struct: &mut DeriveInput) {
+    let new_struct_name =
+        new_name.unwrap_or_else(|| "Optional".to_owned() + &new_struct.ident.to_string());
 
     new_struct.ident = Ident::new(&new_struct_name, new_struct.ident.span());
 }
 
-fn iter_struct_fields<F: Fn(&mut Field, Option<proc_macro2::TokenTree>)>(
+fn iter_struct_fields(
     the_struct: &mut DeriveInput,
-    f: &F,
+    apply_attribute_metadata: bool,
+    default_wrapping: bool,
 ) {
     let data_struct = match &mut the_struct.data {
         Data::Struct(data_struct) => data_struct,
@@ -98,34 +127,21 @@ fn iter_struct_fields<F: Fn(&mut Field, Option<proc_macro2::TokenTree>)>(
 
     for field in fields.iter_mut() {
         if !is_type_option(&field.ty) {
-            let index_and_new_type = get_rename_attribute(field);
-            if let Some((i, new_type)) = index_and_new_type {
-                f(field, Some(new_type));
-                field.attrs.swap_remove(i);
-            } else {
-                f(field, None);
+            let field_meta_data = extract_relevant_attributes(field, default_wrapping);
+            if apply_attribute_metadata {
+                field_meta_data.apply_to_field(field);
             }
         }
     }
 }
 
-fn set_new_struct_fields(new_struct: &mut DeriveInput) {
-    let wrap_with_option = |field: &mut Field, token_tree: Option<proc_macro2::TokenTree>| {
-        let t = match token_tree {
-            Some(tt) => strip_from_delimiter(&tt),
-            None => {
-                let t = &field.ty;
-                quote! { #t }
-            }
-        };
-        field.ty = Type::Verbatim(quote! { Option<#t> });
-    };
-    iter_struct_fields(new_struct, &wrap_with_option)
+fn set_new_struct_fields(new_struct: &mut DeriveInput, default_wrapping: bool) {
+    iter_struct_fields(new_struct, true, default_wrapping)
 }
 
 fn remove_optional_struct_attributes(original_struct: &mut DeriveInput) {
-    let do_nothing = |_field: &mut Field, _token_tree: Option<proc_macro2::TokenTree>| {};
-    iter_struct_fields(original_struct, &do_nothing)
+    // Last boolean isn't actually used but w/e
+    iter_struct_fields(original_struct, false, true)
 }
 
 fn path_is(p: &Path, name: &str) -> bool {
@@ -135,41 +151,69 @@ fn path_is(p: &Path, name: &str) -> bool {
     }
 }
 
-const RENAME_ATTRIBUTE: &str = "optional_rename";
-fn strip_from_delimiter(token_tree: &proc_macro2::TokenTree) -> proc_macro2::TokenStream {
-    match token_tree {
-        proc_macro2::TokenTree::Ident(i) => quote! {#i},
-        proc_macro2::TokenTree::Group(g) => {
-            let tokens = g.stream().into_iter().collect::<Vec<_>>();
-            if tokens.len() != 1 {
-                panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one token (the new type to use)");
-            }
-            strip_from_delimiter(&tokens[0])
-        }
-        proc_macro2::TokenTree::Punct(_) => panic!("POUF"),
-        proc_macro2::TokenTree::Literal(_) => {
-            panic!("Token passed to '{RENAME_ATTRIBUTE}' attribute should be a type")
-        }
+struct FieldAttributeData {
+    wrap: bool,
+    new_type: Option<proc_macro2::TokenTree>,
+}
+
+impl FieldAttributeData {
+    fn apply_to_field(self, f: &mut Field) {
+        let mut new_type = if let Some(t) = self.new_type {
+            quote! {#t}
+        } else {
+            let t = &f.ty;
+            quote! {#t}
+        };
+
+        if self.wrap {
+            new_type = quote! {Option<#new_type>};
+        };
+        f.ty = Type::Verbatim(new_type);
     }
 }
 
-fn get_rename_attribute(field: &mut Field) -> Option<(usize, proc_macro2::TokenTree)> {
-    field
+fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> FieldAttributeData {
+    const RENAME_ATTRIBUTE: &str = "optional_rename";
+    const SKIP_WRAP_ATTRIBUTE: &str = "optional_skip_wrap";
+    const WRAP_ATTRIBUTE: &str = "optional_wrap";
+
+    let mut field_attribute_data = FieldAttributeData {
+        wrap: default_wrapping,
+        new_type: None,
+    };
+    let indexes_to_remove = field
         .attrs
         .iter()
         .enumerate()
-        .find_map(|(i, a)| {
-            if !path_is(&a.path, RENAME_ATTRIBUTE) {
-                return None;
-            }
+        .filter_map(|(i, a)| {
+            if path_is(&a.path, RENAME_ATTRIBUTE) {
+                let mut tokens = a.tokens.clone().into_iter().collect::<Vec<_>>();
+                if tokens.len() != 1 {
+                    panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one token (the new type to use)");
+                }
 
-            let mut tokens = a.tokens.clone().into_iter().collect::<Vec<_>>();
-            if tokens.len() != 1 {
-                panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one token (the new type to use)");
+                field_attribute_data.new_type = Some(tokens.pop().unwrap());
+                Some(i)
             }
-
-            Some((i, tokens.pop().unwrap()))
+            else if path_is(&a.path, SKIP_WRAP_ATTRIBUTE) {
+                field_attribute_data.wrap = false;
+                Some(i)
+            }
+            else if path_is(&a.path, WRAP_ATTRIBUTE) {
+                field_attribute_data.wrap = true;
+                Some(i)
+            }
+            else {
+                None
+            }
         })
+        .collect::<Vec<_>>();
+
+    // Don't forget to reverse so the indices are removed without being shifted!
+    for i in indexes_to_remove.into_iter().rev() {
+        field.attrs.swap_remove(i);
+    }
+    field_attribute_data
 }
 
 fn acc_assigning<T: std::iter::Iterator<Item = U>, U: std::borrow::Borrow<Ident>>(
@@ -238,11 +282,12 @@ pub fn optional_struct(
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let attr = parse_macro_input!(attr as AttributeArgs);
+    let global_att = GlobalAttributes::new(&attr);
     let mut derive_input = parse_macro_input!(input as DeriveInput);
     let mut new_struct = derive_input.clone();
 
-    set_new_struct_name(&attr, &mut new_struct);
-    set_new_struct_fields(&mut new_struct);
+    set_new_struct_name(global_att.new_struct_name, &mut new_struct);
+    set_new_struct_fields(&mut new_struct, global_att.default_wrapping_behavior);
     // https://github.com/rust-lang/rust/issues/65823 :(
     remove_optional_struct_attributes(&mut derive_input);
     let apply_fn_impl = generate_apply_fn(&derive_input, &new_struct);

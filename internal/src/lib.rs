@@ -10,8 +10,8 @@ impl<T> Applyable<T> for Option<T> {
     }
 }
 
-impl<T> Applyable<Option<T>> for Option<T> {
-    fn apply_to(self, t: &mut Option<T>) {
+impl<T> Applyable<T> for T {
+    fn apply_to(self, t: &mut T) {
         *t = self;
     }
 }
