@@ -1,7 +1,7 @@
 #[macro_use]
 extern crate optional_struct;
 
-#[derive(OptionalStruct)]
+#[optional_struct]
 struct GenericConfig<T: std::fmt::Debug, V> {
     value_t: T,
     value_v: V,

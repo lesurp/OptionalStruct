@@ -1,11 +1,11 @@
 #[macro_use]
 extern crate optional_struct;
 
-// TODO: how to deal with this...
-/*
 #[optional_struct]
 struct Config {
     timeout: Option<u32>,
+
+    #[optional_rename(OptionalLogConfig)]
     log_config: LogConfig,
 }
 
@@ -27,16 +27,15 @@ fn test_apply_options() {
 
     let opt_config = OptionalConfig {
         timeout: None,
-        log_config: OptionalLogConfig {
+        log_config: Some(OptionalLogConfig {
             log_file: Some("/tmp/bar.log".to_owned()),
             log_level: None,
-        },
+        }),
     };
 
-    config.apply_options(opt_config);
+    opt_config.apply_to(&mut config);
 
     assert_eq!(config.timeout, None);
     assert_eq!(config.log_config.log_file, "/tmp/bar.log");
     assert_eq!(config.log_config.log_level, 3);
 }
-*/
