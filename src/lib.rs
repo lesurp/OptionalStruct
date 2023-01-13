@@ -1,9 +1,26 @@
+use quote::{format_ident, quote};
 use syn::{
-    parse_macro_input, AttributeArgs, Data, DeriveInput, Fields, Ident, Meta, NestedMeta, Path,
-    Type,
+    parse_macro_input, AttributeArgs, Data, DeriveInput, Field, Fields, Ident, Meta, NestedMeta,
+    Path, Type,
 };
 
-use quote::{format_ident, quote};
+trait Applyable<T> {
+    fn apply_to(self, t: &mut T);
+}
+
+impl<T> Applyable<T> for Option<T> {
+    fn apply_to(self, t: &mut T) {
+        if let Some(s) = self {
+            *t = s;
+        }
+    }
+}
+
+impl<T> Applyable<Option<T>> for Option<T> {
+    fn apply_to(self, t: &mut Option<T>) {
+        *t = self;
+    }
+}
 
 fn is_path_option(p: &Path) -> bool {
     p.segments
@@ -43,7 +60,8 @@ fn is_type_option(t: &Type) -> bool {
         Type::BareFn(_) => wtf!("function pointer"),
 
         // Help
-        Type::Verbatim(_) | Type::Group(_) => todo!("Didn't get what this was supposed to be..."),
+        Type::Verbatim(_) => todo!("Didn't get what this was supposed to be..."),
+        Type::Group(_) => todo!("Not sure what to do here"),
 
         // Have to wildcard here but I don't want to (unneeded as long as syn doesn't break semver
         // anyway)
@@ -81,8 +99,11 @@ fn set_new_struct_name(attr: &AttributeArgs, new_struct: &mut DeriveInput) {
     new_struct.ident = Ident::new(&new_struct_name, new_struct.ident.span());
 }
 
-fn set_new_struct_fields(new_struct: &mut DeriveInput) {
-    let data_struct = match &mut new_struct.data {
+fn iter_struct_fields<F: Fn(&mut Field, Option<proc_macro2::TokenTree>)>(
+    the_struct: &mut DeriveInput,
+    f: &F,
+) {
+    let data_struct = match &mut the_struct.data {
         Data::Struct(data_struct) => data_struct,
         _ => panic!("OptionalStruct only works for structs :)"),
     };
@@ -93,27 +114,91 @@ fn set_new_struct_fields(new_struct: &mut DeriveInput) {
         Fields::Unit => unreachable!("A struct cannot have simply a unit field?"),
     };
 
-    for field in fields {
+    for field in fields.iter_mut() {
         if !is_type_option(&field.ty) {
-            // required because quote chokes on #a.b
-            let t = &field.ty;
-            field.ty = Type::Verbatim(quote! { Option<#t> });
+            let index_and_new_type = get_rename_attribute(field);
+            if let Some((i, new_type)) = index_and_new_type {
+                f(field, Some(new_type));
+                field.attrs.swap_remove(i);
+            } else {
+                f(field, None);
+            }
         }
     }
+}
+
+fn set_new_struct_fields(new_struct: &mut DeriveInput) {
+    let wrap_with_option = |field: &mut Field, token_tree: Option<proc_macro2::TokenTree>| {
+        let t = match token_tree {
+            Some(tt) => strip_from_delimiter(&tt),
+            None => {
+                let t = &field.ty;
+                quote! { #t }
+            }
+        };
+        field.ty = Type::Verbatim(quote! { Option<#t> });
+    };
+    iter_struct_fields(new_struct, &wrap_with_option)
+}
+
+fn remove_optional_struct_attributes(original_struct: &mut DeriveInput) {
+    let do_nothing = |_field: &mut Field, _token_tree: Option<proc_macro2::TokenTree>| {};
+    iter_struct_fields(original_struct, &do_nothing)
+}
+
+fn path_is(p: &Path, name: &str) -> bool {
+    match p.segments.len() {
+        1 => p.segments[0].ident == name,
+        _ => false,
+    }
+}
+
+const RENAME_ATTRIBUTE: &str = "optional_rename";
+fn strip_from_delimiter(token_tree: &proc_macro2::TokenTree) -> proc_macro2::TokenStream {
+    match token_tree {
+        proc_macro2::TokenTree::Ident(i) => quote! {#i},
+        proc_macro2::TokenTree::Group(g) => {
+            let tokens = g.stream().into_iter().collect::<Vec<_>>();
+            if tokens.len() != 1 {
+                panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one token (the new type to use)");
+            }
+            strip_from_delimiter(&tokens[0])
+        }
+        proc_macro2::TokenTree::Punct(_) => panic!("POUF"),
+        proc_macro2::TokenTree::Literal(_) => {
+            panic!("Token passed to '{RENAME_ATTRIBUTE}' attribute should be a type")
+        }
+    }
+}
+
+fn get_rename_attribute(field: &mut Field) -> Option<(usize, proc_macro2::TokenTree)> {
+    field
+        .attrs
+        .iter()
+        .enumerate()
+        .find_map(|(i, a)| {
+            if !path_is(&a.path, RENAME_ATTRIBUTE) {
+                return None;
+            }
+
+            let mut tokens = a.tokens.clone().into_iter().collect::<Vec<_>>();
+            if tokens.len() != 1 {
+                panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one token (the new type to use)");
+            }
+
+            Some((i, tokens.pop().unwrap()))
+        })
 }
 
 fn acc_assigning<T: std::iter::Iterator<Item = U>, U: std::borrow::Borrow<Ident>>(
     idents: T,
 ) -> proc_macro2::TokenStream {
     let mut acc = quote! {};
-    for field in idents {
-        let field = field.borrow();
+    for ident in idents {
+        let ident = ident.borrow();
         acc = quote! {
             #acc
-            if let Some(val) = o.#field {
-                // TODO: check if self.#field is not an option too!
-                self.#field = val;
-            }
+            self.#ident.apply_to(&mut t.#ident);
         };
     }
     acc
@@ -147,9 +232,18 @@ fn generate_apply_fn(
         }
     };
 
+    let (impl_generics, ty_generics, where_clause) = derive_input.generics.split_for_impl();
     quote! {
-        impl #orig_name {
-            pub fn apply_options(&mut self, o: &#new_name) {
+        impl #impl_generics Applyable<#orig_name #ty_generics> #where_clause for Option<#new_name #ty_generics >{
+            fn apply_to(self, t: &mut #orig_name #ty_generics) {
+                if let Some(s) = self {
+                    s.apply_to(t);
+                }
+            }
+        }
+
+        impl #impl_generics Applyable<#orig_name #ty_generics> #where_clause for #new_name #ty_generics {
+            fn apply_to(self, t: &mut #orig_name #ty_generics) {
                 #acc
             }
         }
@@ -162,33 +256,22 @@ pub fn optional_struct(
     input: proc_macro::TokenStream,
 ) -> proc_macro::TokenStream {
     let attr = parse_macro_input!(attr as AttributeArgs);
-    let derive_input = parse_macro_input!(input as DeriveInput);
+    let mut derive_input = parse_macro_input!(input as DeriveInput);
     let mut new_struct = derive_input.clone();
 
     set_new_struct_name(&attr, &mut new_struct);
     set_new_struct_fields(&mut new_struct);
+    // https://github.com/rust-lang/rust/issues/65823 :(
+    remove_optional_struct_attributes(&mut derive_input);
     let apply_fn_impl = generate_apply_fn(&derive_input, &new_struct);
 
     let output = quote! {
         #derive_input
 
-        #[derive(Default, Clone, PartialEq)]
+        #[derive(Default, Clone, PartialEq, Debug)]
         #new_struct
 
         #apply_fn_impl
     };
     proc_macro::TokenStream::from(output)
-}
-
-#[proc_macro_derive(
-    OptionalStruct,
-    attributes(
-        optional_name,
-        optional_derive,
-        opt_nested_original,
-        opt_nested_generated
-    )
-)]
-pub fn optional_struct_derive(input: proc_macro::TokenStream) -> proc_macro::TokenStream {
-    optional_struct(proc_macro::TokenStream::new(), input)
 }
