@@ -1,5 +1,4 @@
-#[macro_use]
-extern crate optional_struct;
+use optional_struct::*;
 
 #[optional_struct]
 struct Config {

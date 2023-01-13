@@ -1,5 +1,4 @@
-#[macro_use]
-extern crate optional_struct;
+use optional_struct::*;
 
 #[optional_struct]
 struct Config {
@@ -26,7 +25,7 @@ fn test_apply_options() {
 
     assert_eq!(opt_config, cloned);
 
-    config.apply_options(opt_config);
+    opt_config.apply_to(&mut config);
     assert_eq!(config.delay, None);
     assert_eq!(config.path, "/tmp/bar.log");
     assert_eq!(config.percentage, 42.24);
