@@ -10,16 +10,11 @@ categories = ["config"]
 keywords = ["macro", "configuration"]
 license = "Apache-2.0"
 repository = "https://github.com/lesurp/OptionalStruct"
-exclude = [".travis.yml"]
 edition = '2021'
 
 [workspace]
 members = ["internal", "macro_impl"]
 
-[badges]
-travis-ci = { repository = "lesurp/OptionalStruct", branch = "master" }
-
 [dependencies]
 internal = { path = "internal" }
 macro_impl = { path = "macro_impl" }
-
