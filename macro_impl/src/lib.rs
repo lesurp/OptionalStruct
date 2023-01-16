@@ -1,7 +1,7 @@
-use quote::{format_ident, quote};
+use quote::{quote, ToTokens};
 use syn::{
-    parse_macro_input, AttributeArgs, Data, DeriveInput, Field, Fields, Ident, Meta, NestedMeta,
-    Path, Type,
+    parse_macro_input, spanned::Spanned, AttributeArgs, Data, DeriveInput, Field, Fields, Ident,
+    Meta, NestedMeta, Path, Type, Visibility,
 };
 
 fn is_path_option(p: &Path) -> bool {
@@ -53,7 +53,12 @@ fn is_type_option(t: &Type) -> bool {
 
 struct GlobalAttributes {
     new_struct_name: Option<String>,
+    field_attributes: GlobalFieldAttributes,
+}
+
+struct GlobalFieldAttributes {
     default_wrapping_behavior: bool,
+    make_fields_public: bool,
 }
 
 impl GlobalAttributes {
@@ -66,7 +71,11 @@ impl GlobalAttributes {
             .unwrap_or(true);
         GlobalAttributes {
             new_struct_name,
-            default_wrapping_behavior,
+            field_attributes: GlobalFieldAttributes {
+                default_wrapping_behavior,
+                // TODO;
+                make_fields_public: true,
+            },
         }
     }
 
@@ -109,11 +118,12 @@ fn set_new_struct_name(new_name: Option<String>, new_struct: &mut DeriveInput) {
     new_struct.ident = Ident::new(&new_struct_name, new_struct.ident.span());
 }
 
-fn iter_struct_fields(
-    the_struct: &mut DeriveInput,
-    apply_attribute_metadata: bool,
-    default_wrapping: bool,
-) {
+fn iter_struct_fields(the_struct: &mut DeriveInput, global_att: Option<&GlobalFieldAttributes>) {
+    // TODO: has to be a cleaner way
+    let (apply_attribute_metadata, default_wrapping, make_fields_public) = match global_att {
+        Some(ga) => (true, ga.default_wrapping_behavior, ga.make_fields_public),
+        None => (false, false, false),
+    };
     let data_struct = match &mut the_struct.data {
         Data::Struct(data_struct) => data_struct,
         _ => panic!("OptionalStruct only works for structs :)"),
@@ -130,18 +140,23 @@ fn iter_struct_fields(
             let field_meta_data = extract_relevant_attributes(field, default_wrapping);
             if apply_attribute_metadata {
                 field_meta_data.apply_to_field(field);
+                if make_fields_public {
+                    field.vis = Visibility::Public(syn::VisPublic {
+                        pub_token: syn::Token![pub](field.vis.span()),
+                    })
+                }
             }
         }
     }
 }
 
-fn set_new_struct_fields(new_struct: &mut DeriveInput, default_wrapping: bool) {
-    iter_struct_fields(new_struct, true, default_wrapping)
+fn set_new_struct_fields(new_struct: &mut DeriveInput, global_att: &GlobalFieldAttributes) {
+    iter_struct_fields(new_struct, global_att.into())
 }
 
 fn remove_optional_struct_attributes(original_struct: &mut DeriveInput) {
     // Last boolean isn't actually used but w/e
-    iter_struct_fields(original_struct, false, true)
+    iter_struct_fields(original_struct, None)
 }
 
 fn path_is(p: &Path, name: &str) -> bool {
@@ -216,7 +231,7 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
     field_attribute_data
 }
 
-fn acc_assigning<T: std::iter::Iterator<Item = U>, U: std::borrow::Borrow<Ident>>(
+fn acc_assigning<T: std::iter::Iterator<Item = U>, U: std::borrow::Borrow<V>, V: ToTokens>(
     idents: T,
 ) -> proc_macro2::TokenStream {
     let mut acc = quote! {};
@@ -246,14 +261,13 @@ fn generate_apply_fn(
         Fields::Unit => unreachable!(),
         Fields::Named(fields_named) => {
             let it = fields_named.named.iter().map(|f| f.ident.as_ref().unwrap());
-            acc_assigning(it)
+            acc_assigning::<_, _, Ident>(it)
         }
         Fields::Unnamed(fields_unnamed) => {
-            let it = fields_unnamed
-                .unnamed
-                .iter()
-                .enumerate()
-                .map(|(i, _)| format_ident!("{i}"));
+            let it = fields_unnamed.unnamed.iter().enumerate().map(|(i, _)| {
+                let i = syn::Index::from(i);
+                quote! {#i}
+            });
             acc_assigning(it)
         }
     };
@@ -287,7 +301,7 @@ pub fn optional_struct(
     let mut new_struct = derive_input.clone();
 
     set_new_struct_name(global_att.new_struct_name, &mut new_struct);
-    set_new_struct_fields(&mut new_struct, global_att.default_wrapping_behavior);
+    set_new_struct_fields(&mut new_struct, &global_att.field_attributes);
     // https://github.com/rust-lang/rust/issues/65823 :(
     remove_optional_struct_attributes(&mut derive_input);
     let apply_fn_impl = generate_apply_fn(&derive_input, &new_struct);
