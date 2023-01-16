@@ -182,7 +182,7 @@ impl FieldAttributeData {
         };
 
         if self.wrap {
-            new_type = quote! {Option<#new_type>};
+            new_type = quote! {OptionalStructureField<#new_type>};
         };
         f.ty = Type::Verbatim(new_type);
     }
@@ -273,7 +273,7 @@ fn generate_apply_fn(
 
     let (impl_generics, ty_generics, where_clause) = derive_input.generics.split_for_impl();
     quote! {
-        impl #impl_generics Applyable<#orig_name #ty_generics> #where_clause for Option<#new_name #ty_generics >{
+        impl #impl_generics optional_struct_internal::Applyable<#orig_name #ty_generics> #where_clause for Option<#new_name #ty_generics >{
             fn apply_to(self, t: &mut #orig_name #ty_generics) {
                 if let Some(s) = self {
                     s.apply_to(t);
@@ -281,10 +281,14 @@ fn generate_apply_fn(
             }
         }
 
-        impl #impl_generics Applyable<#orig_name #ty_generics> #where_clause for #new_name #ty_generics {
+        impl #impl_generics optional_struct_internal::Applyable<#orig_name #ty_generics> #where_clause for #new_name #ty_generics {
             fn apply_to(self, t: &mut #orig_name #ty_generics) {
                 #acc
             }
+        }
+
+        impl optional_struct_internal::OptionalRepresentation for #orig_name #ty_generics {
+            type Inner = #new_name #ty_generics;
         }
     }
 }

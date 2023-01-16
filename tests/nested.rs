@@ -4,7 +4,6 @@ use optional_struct::*;
 struct Config {
     timeout: Option<u32>,
 
-    #[optional_rename(OptionalLogConfig)]
     log_config: LogConfig,
 }
 

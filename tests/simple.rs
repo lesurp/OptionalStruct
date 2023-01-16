@@ -1,3 +1,4 @@
+#![feature(specialization)]
 use optional_struct::*;
 
 #[optional_struct]
