@@ -2,9 +2,8 @@ use std::collections::HashSet;
 
 use quote::{format_ident, quote, ToTokens};
 use syn::{
-    parse2, parse_macro_input, punctuated::Punctuated, spanned::Spanned, token::Comma,
-    AttributeArgs, Data, DeriveInput, Field, Fields, Ident, Meta, NestedMeta, Path, PathSegment,
-    Type, Visibility,
+    parse_macro_input, spanned::Spanned, AttributeArgs, Data, DeriveInput, Field, Fields, Ident,
+    Meta, NestedMeta, Path, Type, Visibility,
 };
 
 fn is_path_option(p: &Path) -> bool {
