@@ -8,9 +8,8 @@ struct Config {
 }
 
 #[test]
-fn test_apply_options() {
+fn test_apply_options_struct() {
     let opt_config = OptionalConfig::default();
-
     assert_eq!(opt_config.delay, None);
     assert_eq!(opt_config.path, None);
     assert_eq!(opt_config.percentage, None);
