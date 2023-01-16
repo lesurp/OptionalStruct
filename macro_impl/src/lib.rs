@@ -203,12 +203,10 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
         .enumerate()
         .filter_map(|(i, a)| {
             if a.path.is_ident(RENAME_ATTRIBUTE) {
-                let mut tokens = a.tokens.clone().into_iter().collect::<Vec<_>>();
-                if tokens.len() != 1 {
-                    panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one token (the new type to use)");
-                }
-
-                field_attribute_data.new_type = Some(tokens.pop().unwrap());
+                let args = a
+                    .parse_args()
+                    .expect("'{RENAME_ATTRIBUTE}' attribute expects one and only one argument (the new type to use)");
+                field_attribute_data.new_type = Some(args);
                 Some(i)
             }
             else if a.path.is_ident(SKIP_WRAP_ATTRIBUTE) {
