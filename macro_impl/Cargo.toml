@@ -2,8 +2,8 @@
 name = "optional_struct_macro_impl"
 version = "0.3.0"
 edition = "2021"
-
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+description = "Helper crate defining the proc_macro for the optional_struct crate"
+license = "Apache-2.0"
 
 [dependencies]
 syn = { version = "1.0.107", features = ["parsing", "proc-macro"] }
