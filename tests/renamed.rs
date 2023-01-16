@@ -1,8 +1,6 @@
-#[macro_use]
-extern crate optional_struct;
+use optional_struct::*;
 
-#[derive(OptionalStruct)]
-#[optional_name = "Woof"]
+#[optional_struct(Woof)]
 struct Config {
     delay: Option<u32>,
     path: String,
@@ -23,7 +21,7 @@ fn test_apply_options() {
         percentage: Some(42.24),
     };
 
-    config.apply_options(opt_config);
+    opt_config.apply_to(&mut config);
 
     assert_eq!(config.delay, None);
     assert_eq!(config.path, "/tmp/bar.log");

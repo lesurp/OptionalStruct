@@ -1,7 +1,6 @@
-#[macro_use]
-extern crate optional_struct;
+use optional_struct::*;
 
-#[derive(OptionalStruct)]
+#[optional_struct]
 struct Config {
     delay: Option<u32>,
     path: String,
@@ -9,9 +8,8 @@ struct Config {
 }
 
 #[test]
-fn test_apply_options() {
-    let opt_config = OptionalConfig::empty();
-
+fn test_apply_options_struct() {
+    let opt_config = OptionalConfig::default();
     assert_eq!(opt_config.delay, None);
     assert_eq!(opt_config.path, None);
     assert_eq!(opt_config.percentage, None);

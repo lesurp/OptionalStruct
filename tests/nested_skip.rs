@@ -5,6 +5,7 @@ struct Config {
     timeout: Option<u32>,
 
     #[optional_rename(OptionalLogConfig)]
+    #[optional_skip_wrap]
     log_config: LogConfig,
 }
 
@@ -15,7 +16,7 @@ struct LogConfig {
 }
 
 #[test]
-fn test_apply_options() {
+fn test_apply_options_nested_skip() {
     let mut config = Config {
         timeout: Some(2),
         log_config: LogConfig {
@@ -26,10 +27,10 @@ fn test_apply_options() {
 
     let opt_config = OptionalConfig {
         timeout: None,
-        log_config: Some(OptionalLogConfig {
+        log_config: OptionalLogConfig {
             log_file: Some("/tmp/bar.log".to_owned()),
             log_level: None,
-        }),
+        },
     };
 
     opt_config.apply_to(&mut config);

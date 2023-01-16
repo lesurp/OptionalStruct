@@ -1,7 +1,6 @@
-#[macro_use]
-extern crate optional_struct;
+use optional_struct::*;
 
-#[derive(OptionalStruct)]
+#[optional_struct]
 struct GenericConfig<T: std::fmt::Debug, V> {
     value_t: T,
     value_v: V,
@@ -19,7 +18,7 @@ fn test_apply_options() {
         value_v: Some("bar"),
     };
 
-    config.apply_options(opt_config);
+    opt_config.apply_to(&mut config);
 
     assert_eq!(config.value_t, 3.0);
     assert_eq!(config.value_v, "bar");
