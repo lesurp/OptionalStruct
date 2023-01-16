@@ -6,6 +6,7 @@ use syn::{
     Meta, NestedMeta, Path, Type, Visibility,
 };
 
+// TODO this breaks for e.g. yolo::my::Option
 fn is_path_option(p: &Path) -> bool {
     p.segments
         .last()
@@ -296,13 +297,7 @@ fn get_derive_macros(
 ) -> proc_macro2::TokenStream {
     let mut extra_derive = extra_derive.iter().collect::<HashSet<_>>();
     for att in &mut new_struct.attrs {
-        let m = if let Ok(m) = att.parse_meta() {
-            m
-        } else {
-            continue;
-        };
-
-        let ml = if let Meta::List(ml) = m {
+        let ml = if let Ok(Meta::List(ml)) = att.parse_meta() {
             ml
         } else {
             continue;
