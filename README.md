@@ -52,7 +52,7 @@ fn main() {
 ## Goal
 
 Since rust does not have default arguments, and some tools are strict when
-deserializing (e.g. serde), missing configuration values can be quite
+deserializing data (e.g. serde), missing configuration values can be quite
 frustrating to deal with. For example:
 
 ```rust
@@ -63,8 +63,8 @@ struct Config {
 ```
 
 If we read the configuration from a file, and the `log_file` is not specified,
-serde will e.g. fail to create the struct. While serde (offers ways to set the
-default value for a field)[https://serde.rs/attr-default.html] with e.g.
+serde will e.g. fail to create the struct. While serde [offers ways to set the
+default value for a field](https://serde.rs/attr-default.html) with e.g.
 
 ```rust
 #[derive(Deserialize)]
@@ -74,29 +74,29 @@ struct Config {
 }
 ```
 
-this has however obvious limitations. This crate aims to fill this gap by allowing
+there are obvious limitations. This crate aims to fill this gap by allowing
 optional values, and providing an easy way to apply values obtained from
-different sources to build our configuration.
+different sources to construct our configuration.
 
 With `optional_struct`, one can define the required
-configuration as it shall be used and only use the generated struct from this
-crate to handle configuration/missing values/default values.
+configuration as it shall be used and only use the generated struct
+to handle configuration/missing values/default values.
 
 
 ## How
 
-The macro `optional_struct` generates a structure containing the fields as the one it was tagged on wrapped by an `Option`.
+The macro `optional_struct` generates a structure containing the same fields as the one it was tagged on, but wrapped by an `Option`.
 A function on the new structure allows applying its values to the original one
 (if the `Option`s are not `None`). This can be called multiple times, to apply
 configuration from different source, while giving the caller complete control
 over how to set the values, since the generated struct can be easily manipulated
-and passed around before generating the final configuration.
+and passed around before constructing the final configuration.
 
 ## Features
 
 1. Rename the generated struct:
 
-```
+```rust
 #[optional_struct(HeyU)]
 struct Config();
 
