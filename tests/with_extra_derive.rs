@@ -2,8 +2,7 @@ use optional_struct::*;
 
 #[optional_struct]
 // TODO this does not work (conflicting implementations)
-// #[derive(std::debug::Debug)]
-#[derive(std::hash::Hash)]
+#[derive(Debug, std::hash::Hash, Clone, PartialEq, Default)]
 struct Config {
     delay: Option<u32>,
     path: String,

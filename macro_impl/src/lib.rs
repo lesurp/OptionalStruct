@@ -1,7 +1,10 @@
-use quote::{quote, ToTokens};
+use std::collections::HashSet;
+
+use quote::{format_ident, quote, ToTokens};
 use syn::{
-    parse_macro_input, spanned::Spanned, AttributeArgs, Data, DeriveInput, Field, Fields, Ident,
-    Meta, NestedMeta, Path, Type, Visibility,
+    parse2, parse_macro_input, punctuated::Punctuated, spanned::Spanned, token::Comma,
+    AttributeArgs, Data, DeriveInput, Field, Fields, Ident, Meta, NestedMeta, Path, PathSegment,
+    Type, Visibility,
 };
 
 fn is_path_option(p: &Path) -> bool {
@@ -53,6 +56,7 @@ fn is_type_option(t: &Type) -> bool {
 
 struct GlobalAttributes {
     new_struct_name: Option<String>,
+    extra_derive: Vec<String>,
     field_attributes: GlobalFieldAttributes,
 }
 
@@ -71,6 +75,10 @@ impl GlobalAttributes {
             .unwrap_or(true);
         GlobalAttributes {
             new_struct_name,
+            extra_derive: vec!["Clone", "PartialEq", "Default", "Debug"]
+                .into_iter()
+                .map(|s| s.to_owned())
+                .collect(),
             field_attributes: GlobalFieldAttributes {
                 default_wrapping_behavior,
                 // TODO;
@@ -159,13 +167,6 @@ fn remove_optional_struct_attributes(original_struct: &mut DeriveInput) {
     iter_struct_fields(original_struct, None)
 }
 
-fn path_is(p: &Path, name: &str) -> bool {
-    match p.segments.len() {
-        1 => p.segments[0].ident == name,
-        _ => false,
-    }
-}
-
 struct FieldAttributeData {
     wrap: bool,
     new_type: Option<proc_macro2::TokenTree>,
@@ -201,7 +202,7 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
         .iter()
         .enumerate()
         .filter_map(|(i, a)| {
-            if path_is(&a.path, RENAME_ATTRIBUTE) {
+            if a.path.is_ident(RENAME_ATTRIBUTE) {
                 let mut tokens = a.tokens.clone().into_iter().collect::<Vec<_>>();
                 if tokens.len() != 1 {
                     panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one token (the new type to use)");
@@ -210,11 +211,11 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
                 field_attribute_data.new_type = Some(tokens.pop().unwrap());
                 Some(i)
             }
-            else if path_is(&a.path, SKIP_WRAP_ATTRIBUTE) {
+            else if a.path.is_ident(SKIP_WRAP_ATTRIBUTE) {
                 field_attribute_data.wrap = false;
                 Some(i)
             }
-            else if path_is(&a.path, WRAP_ATTRIBUTE) {
+            else if a.path.is_ident(WRAP_ATTRIBUTE) {
                 field_attribute_data.wrap = true;
                 Some(i)
             }
@@ -290,6 +291,49 @@ fn generate_apply_fn(
     }
 }
 
+fn get_derive_macros(
+    new_struct: &mut DeriveInput,
+    extra_derive: &[String],
+) -> proc_macro2::TokenStream {
+    let mut extra_derive = extra_derive.iter().collect::<HashSet<_>>();
+    for att in &mut new_struct.attrs {
+        let m = if let Ok(m) = att.parse_meta() {
+            m
+        } else {
+            continue;
+        };
+
+        let ml = if let Meta::List(ml) = m {
+            ml
+        } else {
+            continue;
+        };
+
+        if !ml.path.is_ident("derive") {
+            continue;
+        }
+
+        for n in ml.nested {
+            let trait_name = if let NestedMeta::Meta(Meta::Path(m)) = n {
+                m
+            } else {
+                continue;
+            };
+            // TODO: this *will* panic
+            let full_path = quote! { #trait_name };
+            extra_derive.remove(&full_path.to_string());
+        }
+    }
+
+    let mut acc = quote! {};
+    for left_trait_to_derive in extra_derive {
+        let left_trait_to_derive = format_ident!("{left_trait_to_derive}");
+        acc = quote! { #left_trait_to_derive, #acc};
+    }
+
+    quote! { #[derive(#acc)] }
+}
+
 #[proc_macro_attribute]
 pub fn optional_struct(
     attr: proc_macro::TokenStream,
@@ -302,6 +346,7 @@ pub fn optional_struct(
 
     set_new_struct_name(global_att.new_struct_name, &mut new_struct);
     set_new_struct_fields(&mut new_struct, &global_att.field_attributes);
+    let derives = get_derive_macros(&mut new_struct, &global_att.extra_derive);
     // https://github.com/rust-lang/rust/issues/65823 :(
     remove_optional_struct_attributes(&mut derive_input);
     let apply_fn_impl = generate_apply_fn(&derive_input, &new_struct);
@@ -309,7 +354,7 @@ pub fn optional_struct(
     let output = quote! {
         #derive_input
 
-        #[derive(Default, Clone, PartialEq, Debug)]
+        #derives
         #new_struct
 
         #apply_fn_impl
