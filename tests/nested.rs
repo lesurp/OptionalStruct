@@ -25,7 +25,7 @@ fn test_apply_options() {
     };
 
     let opt_config = OptionalConfig {
-        timeout: None,
+        timeout: Some(None),
         log_config: Some(OptionalLogConfig {
             log_file: Some("/tmp/bar.log".to_owned()),
             log_level: None,

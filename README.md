@@ -190,8 +190,8 @@ options are simply overridden.
 
 ## TODOs / open questions
 
-1. Allow *not* overridding `Option<T> -> Option<T>` if the original `Option` is
-   set but not the applied one.
+1. Allow overridding `Option<T> -> Option<T>` if the original `Option` is
+   set but not the applied one?
 
 2. Allow wrapping behavior to be set without manually writing the struct name.
 

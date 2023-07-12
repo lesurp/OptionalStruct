@@ -26,7 +26,7 @@ fn test_apply_options_nested_skip() {
     };
 
     let opt_config = OptionalConfig {
-        timeout: None,
+        timeout: Some(None),
         log_config: OptionalLogConfig {
             log_file: Some("/tmp/bar.log".to_owned()),
             log_level: None,

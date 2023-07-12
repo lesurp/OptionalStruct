@@ -3,56 +3,8 @@ use std::collections::HashSet;
 use quote::{format_ident, quote, ToTokens};
 use syn::{
     parse_macro_input, spanned::Spanned, AttributeArgs, Data, DeriveInput, Field, Fields, Ident,
-    Meta, NestedMeta, Path, Type, Visibility,
+    Meta, NestedMeta, Type, Visibility,
 };
-
-// TODO this breaks for e.g. yolo::my::Option
-fn is_path_option(p: &Path) -> bool {
-    p.segments
-        .last()
-        .map(|ps| ps.ident == "Option")
-        .unwrap_or(false)
-}
-
-fn is_type_option(t: &Type) -> bool {
-    macro_rules! wtf {
-        ($reason : tt) => {
-            panic!(
-                "Using OptionalStruct for a struct containing a {} is dubious...",
-                $reason
-            )
-        };
-    }
-
-    match &t {
-        // real work
-        Type::Path(type_path) => is_path_option(&type_path.path),
-        Type::Array(_) | Type::Tuple(_) => false,
-        Type::Paren(type_paren) => is_type_option(&type_paren.elem),
-
-        // No clue what to do with those
-        Type::ImplTrait(_) | Type::TraitObject(_) => {
-            panic!("Might already be an option I have no way to tell :/")
-        }
-        Type::Infer(_) => panic!("If you cannot tell, neither can I"),
-        Type::Macro(_) => panic!("Don't think I can handle this easily..."),
-
-        // Makes no sense to use those in an OptionalStruct
-        Type::Reference(_) => wtf!("reference"),
-        Type::Never(_) => wtf!("never-type"),
-        Type::Slice(_) => wtf!("slice"),
-        Type::Ptr(_) => wtf!("pointer"),
-        Type::BareFn(_) => wtf!("function pointer"),
-
-        // Help
-        Type::Verbatim(_) => todo!("Didn't get what this was supposed to be..."),
-        Type::Group(_) => todo!("Not sure what to do here"),
-
-        // Have to wildcard here but I don't want to (unneeded as long as syn doesn't break semver
-        // anyway)
-        _ => panic!("Open an issue please :)"),
-    }
-}
 
 struct GlobalAttributes {
     new_struct_name: Option<String>,
@@ -144,15 +96,13 @@ fn iter_struct_fields(the_struct: &mut DeriveInput, global_att: Option<&GlobalFi
     };
 
     for field in fields.iter_mut() {
-        if !is_type_option(&field.ty) {
-            let field_meta_data = extract_relevant_attributes(field, default_wrapping);
-            if apply_attribute_metadata {
-                field_meta_data.apply_to_field(field);
-                if make_fields_public {
-                    field.vis = Visibility::Public(syn::VisPublic {
-                        pub_token: syn::Token![pub](field.vis.span()),
-                    })
-                }
+        let field_meta_data = extract_relevant_attributes(field, default_wrapping);
+        if apply_attribute_metadata {
+            field_meta_data.apply_to_field(field);
+            if make_fields_public {
+                field.vis = Visibility::Public(syn::VisPublic {
+                    pub_token: syn::Token![pub](field.vis.span()),
+                })
             }
         }
     }
