@@ -1,10 +1,44 @@
 use std::collections::HashSet;
 
+use proc_macro2::{TokenStream, TokenTree};
 use quote::{format_ident, quote, ToTokens};
-use syn::{
-    parse_macro_input, spanned::Spanned, AttributeArgs, Data, DeriveInput, Field, Fields, Ident,
-    Meta, NestedMeta, Path, Type, Visibility,
-};
+use syn::{Data, DeriveInput, Field, Fields, Ident, Path, spanned::Spanned, Token, Type, Visibility};
+use syn::parse::{Parse, ParseStream};
+
+#[cfg(test)]
+mod test;
+
+struct StructAttribute {
+    new_struct_name: Option<String>,
+    default_wrapping: bool,
+}
+
+impl Parse for StructAttribute {
+    fn parse(input: ParseStream) -> syn::Result<Self> {
+        let mut out = StructAttribute {
+            new_struct_name: None,
+            default_wrapping: true,
+        };
+
+        if let Ok(struct_name) = Ident::parse(input) {
+            out.new_struct_name = Some(struct_name.to_string());
+        } else {
+            return Ok(out);
+        };
+
+        if input.parse::<Token![,]>().is_err() {
+            return Ok(out);
+        };
+
+        if let Ok(wrapping) = syn::LitBool::parse(input) {
+            out.default_wrapping = wrapping.value;
+        } else {
+            return Ok(out);
+        };
+
+        Ok(out)
+    }
+}
 
 // TODO this breaks for e.g. yolo::my::Option
 fn is_path_option(p: &Path) -> bool {
@@ -67,12 +101,9 @@ struct GlobalFieldAttributes {
 
 impl GlobalAttributes {
     // TODO: should use named arguments
-    fn new(attr: &AttributeArgs) -> Self {
-        let new_struct_name = attr.get(0).map(GlobalAttributes::get_new_name);
-        let default_wrapping_behavior = attr
-            .get(1)
-            .map(GlobalAttributes::get_wrapping)
-            .unwrap_or(true);
+    fn new(attr: StructAttribute) -> Self {
+        let new_struct_name = attr.new_struct_name;
+        let default_wrapping_behavior = attr.default_wrapping;
         GlobalAttributes {
             new_struct_name,
             extra_derive: vec!["Clone", "PartialEq", "Default", "Debug"]
@@ -84,37 +115,6 @@ impl GlobalAttributes {
                 // TODO;
                 make_fields_public: true,
             },
-        }
-    }
-
-    fn get_new_name(ns: &NestedMeta) -> String {
-        let m = if let NestedMeta::Meta(m) = ns {
-            m
-        } else {
-            panic!("Only NestedMeta are accepted");
-        };
-        let p = match m {
-            Meta::Path(p) => p,
-            Meta::NameValue(_) | Meta::List(_) => {
-                panic!("Expecting a path for first argument of 'optional_struct'")
-            }
-        };
-        p.segments
-            .last()
-            .expect("How can we have an empty path here?")
-            .ident
-            .to_string()
-    }
-
-    fn get_wrapping(ns: &NestedMeta) -> bool {
-        let lit = if let NestedMeta::Lit(lit) = ns {
-            lit
-        } else {
-            panic!("Only literal booleans are accepted for 2nd argument of 'optional_struct'");
-        };
-        match lit {
-            syn::Lit::Bool(lb) => lb.value,
-            _ => panic!("Only literal booleans are accepted for 2nd argument of 'optional_struct'"),
         }
     }
 }
@@ -144,15 +144,11 @@ fn iter_struct_fields(the_struct: &mut DeriveInput, global_att: Option<&GlobalFi
     };
 
     for field in fields.iter_mut() {
-        if !is_type_option(&field.ty) {
-            let field_meta_data = extract_relevant_attributes(field, default_wrapping);
-            if apply_attribute_metadata {
-                field_meta_data.apply_to_field(field);
-                if make_fields_public {
-                    field.vis = Visibility::Public(syn::VisPublic {
-                        pub_token: syn::Token![pub](field.vis.span()),
-                    })
-                }
+        let field_meta_data = extract_relevant_attributes(field, default_wrapping);
+        if apply_attribute_metadata {
+            field_meta_data.apply_to_field(field);
+            if make_fields_public {
+                field.vis = Visibility::Public(syn::token::Pub(field.vis.span()))
             }
         }
     }
@@ -169,7 +165,7 @@ fn remove_optional_struct_attributes(original_struct: &mut DeriveInput) {
 
 struct FieldAttributeData {
     wrap: bool,
-    new_type: Option<proc_macro2::TokenTree>,
+    new_type: Option<TokenTree>,
 }
 
 impl FieldAttributeData {
@@ -194,7 +190,7 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
     const WRAP_ATTRIBUTE: &str = "optional_wrap";
 
     let mut field_attribute_data = FieldAttributeData {
-        wrap: default_wrapping,
+        wrap: !is_type_option(&field.ty) && default_wrapping,
         new_type: None,
     };
     let indexes_to_remove = field
@@ -202,22 +198,19 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
         .iter()
         .enumerate()
         .filter_map(|(i, a)| {
-            if a.path.is_ident(RENAME_ATTRIBUTE) {
+            if a.path().is_ident(RENAME_ATTRIBUTE) {
                 let args = a
                     .parse_args()
                     .expect("'{RENAME_ATTRIBUTE}' attribute expects one and only one argument (the new type to use)");
                 field_attribute_data.new_type = Some(args);
                 Some(i)
-            }
-            else if a.path.is_ident(SKIP_WRAP_ATTRIBUTE) {
+            } else if a.path().is_ident(SKIP_WRAP_ATTRIBUTE) {
                 field_attribute_data.wrap = false;
                 Some(i)
-            }
-            else if a.path.is_ident(WRAP_ATTRIBUTE) {
+            } else if a.path().is_ident(WRAP_ATTRIBUTE) {
                 field_attribute_data.wrap = true;
                 Some(i)
-            }
-            else {
+            } else {
                 None
             }
         })
@@ -230,9 +223,9 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
     field_attribute_data
 }
 
-fn acc_assigning<T: std::iter::Iterator<Item = U>, U: std::borrow::Borrow<V>, V: ToTokens>(
+fn acc_assigning<T: std::iter::Iterator<Item=U>, U: std::borrow::Borrow<V>, V: ToTokens>(
     idents: T,
-) -> proc_macro2::TokenStream {
+) -> TokenStream {
     let mut acc = quote! {};
     for ident in idents {
         let ident = ident.borrow();
@@ -247,7 +240,7 @@ fn acc_assigning<T: std::iter::Iterator<Item = U>, U: std::borrow::Borrow<V>, V:
 fn generate_apply_fn(
     derive_input: &DeriveInput,
     new_struct: &DeriveInput,
-) -> proc_macro2::TokenStream {
+) -> TokenStream {
     let orig_name = &derive_input.ident;
     let new_name = &new_struct.ident;
 
@@ -292,48 +285,40 @@ fn generate_apply_fn(
 fn get_derive_macros(
     new_struct: &mut DeriveInput,
     extra_derive: &[String],
-) -> proc_macro2::TokenStream {
+) -> TokenStream {
     let mut extra_derive = extra_derive.iter().collect::<HashSet<_>>();
-    for att in &mut new_struct.attrs {
-        let ml = if let Ok(Meta::List(ml)) = att.parse_meta() {
-            ml
-        } else {
-            continue;
-        };
-
-        if !ml.path.is_ident("derive") {
-            continue;
-        }
-
-        for n in ml.nested {
-            let trait_name = if let NestedMeta::Meta(Meta::Path(m)) = n {
-                m
-            } else {
-                continue;
-            };
-            // TODO: this *will* panic
-            let full_path = quote! { #trait_name };
-            extra_derive.remove(&full_path.to_string());
-        }
+    for attributes in &mut new_struct.attrs {
+        let _ = attributes.parse_nested_meta(|derived_trait|
+            {
+                let derived_trait = derived_trait.path;
+                let full_path = quote! { #derived_trait };
+                extra_derive.remove(&full_path.to_string());
+                Ok(())
+            });
     }
+
 
     let mut acc = quote! {};
     for left_trait_to_derive in extra_derive {
         let left_trait_to_derive = format_ident!("{left_trait_to_derive}");
-        acc = quote! { #left_trait_to_derive, #acc};
+        acc = quote! { # left_trait_to_derive, # acc};
     }
 
     quote! { #[derive(#acc)] }
 }
 
-#[proc_macro_attribute]
-pub fn optional_struct(
-    attr: proc_macro::TokenStream,
-    input: proc_macro::TokenStream,
-) -> proc_macro::TokenStream {
-    let attr = parse_macro_input!(attr as AttributeArgs);
-    let global_att = GlobalAttributes::new(&attr);
-    let mut derive_input = parse_macro_input!(input as DeriveInput);
+pub struct OptionalStructOutput {
+    pub original: TokenStream,
+    pub generated: TokenStream,
+}
+
+pub fn opt_struct(
+    attr: TokenStream,
+    input: TokenStream,
+) -> OptionalStructOutput {
+    let attr = syn::parse2::<_>(attr).unwrap();
+    let global_att = GlobalAttributes::new(attr);
+    let mut derive_input = syn::parse2::<DeriveInput>(input).unwrap();
     let mut new_struct = derive_input.clone();
 
     set_new_struct_name(global_att.new_struct_name, &mut new_struct);
@@ -343,13 +328,13 @@ pub fn optional_struct(
     remove_optional_struct_attributes(&mut derive_input);
     let apply_fn_impl = generate_apply_fn(&derive_input, &new_struct);
 
-    let output = quote! {
-        #derive_input
+    OptionalStructOutput {
+        original: quote! { #derive_input },
+        generated: quote! {
+            #derives
+            #new_struct
 
-        #derives
-        #new_struct
-
-        #apply_fn_impl
-    };
-    proc_macro::TokenStream::from(output)
+            #apply_fn_impl
+        },
+    }
 }

@@ -1,0 +1,13 @@
+[package]
+name = "export"
+version = "0.3.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+implementation = { version = "0.3.0", path = "../implementation" }
+quote = { version = "1.0.33", features = [] }
+
+[lib]
+proc-macro = true
