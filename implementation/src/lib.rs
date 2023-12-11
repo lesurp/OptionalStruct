@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use proc_macro2::{TokenStream, TokenTree};
 use quote::{format_ident, quote, ToTokens};
-use syn::{Data, DeriveInput, Field, Fields, Ident, Path, spanned::Spanned, Token, Type, Visibility};
+use syn::{Attribute, Data, DeriveInput, Field, Fields, Ident, Path, spanned::Spanned, Token, Type, Visibility};
 use syn::parse::{Parse, ParseStream};
 
 #[cfg(test)]
@@ -223,14 +223,17 @@ fn extract_relevant_attributes(field: &mut Field, default_wrapping: bool) -> Fie
     field_attribute_data
 }
 
-fn acc_assigning<T: std::iter::Iterator<Item=U>, U: std::borrow::Borrow<V>, V: ToTokens>(
-    idents: T,
+fn acc_assigning<'a, T: Iterator<Item=(U, &'a Vec<Attribute>)>, U: std::borrow::Borrow<V>, V: ToTokens>(
+    idents_with_attrs: T,
 ) -> TokenStream {
     let mut acc = quote! {};
-    for ident in idents {
+    for (ident, attrs) in idents_with_attrs {
         let ident = ident.borrow();
+        let cfg_attr = attrs.iter().find(|attr| attr.path().is_ident("cfg"));
         acc = quote! {
             #acc
+
+            #cfg_attr
             self.#ident.apply_to(&mut t.#ident);
         };
     }
@@ -252,13 +255,13 @@ fn generate_apply_fn(
     let acc = match &fields {
         Fields::Unit => unreachable!(),
         Fields::Named(fields_named) => {
-            let it = fields_named.named.iter().map(|f| f.ident.as_ref().unwrap());
+            let it = fields_named.named.iter().map(|f| (f.ident.as_ref().unwrap(), &f.attrs));
             acc_assigning::<_, _, Ident>(it)
         }
         Fields::Unnamed(fields_unnamed) => {
-            let it = fields_unnamed.unnamed.iter().enumerate().map(|(i, _)| {
+            let it = fields_unnamed.unnamed.iter().enumerate().map(|(i, field)| {
                 let i = syn::Index::from(i);
-                quote! {#i}
+                (quote! {#i}, &field.attrs)
             });
             acc_assigning(it)
         }

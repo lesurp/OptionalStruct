@@ -42,3 +42,15 @@ fn with_option() {
         }
     ));
 }
+
+#[test]
+fn with_cfg_attributes() {
+    opt_struct(quote!(), quote!(
+        struct Foo {
+            #[cfg(all())]
+            bar: u8,
+            #[cfg(any())]
+            baz: u8,
+        }
+    ));
+}
