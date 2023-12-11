@@ -16,4 +16,4 @@ edition = '2021'
 members = ["export", "implementation"]
 
 [dependencies]
-export = { version = "0.3.0", path = "./export" }
+optional_struct_export = { version = "0.3.2", path = "export" }

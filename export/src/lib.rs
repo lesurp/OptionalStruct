@@ -1,4 +1,4 @@
-use implementation::opt_struct;
+use optional_struct_macro_impl::opt_struct;
 use quote::quote;
 
 #[proc_macro_attribute]

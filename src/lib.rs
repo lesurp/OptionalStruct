@@ -1,4 +1,4 @@
-pub use export::optional_struct;
+pub use optional_struct_export::optional_struct;
 
 pub trait Applyable<T> {
     fn apply_to(self, t: &mut T);
