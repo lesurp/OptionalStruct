@@ -1,35 +1,7 @@
-#![feature(specialization)]
-
 pub use optional_struct_export::optional_struct;
 
 pub trait Applyable<T> {
     fn apply_to(self, t: &mut T);
-
-    fn can_be_applied(&self) -> bool {
-        true
-    }
-}
-
-impl<T> Applyable<T> for T {
-    fn apply_to(self, t: &mut T) {
-        *t = self;
-    }
-
-    fn can_be_applied(&self) -> bool {
-        true
-    }
-}
-
-impl<T> Applyable<T> for Option<T> {
-    fn apply_to(self, t: &mut T) {
-        if let Some(s) = self {
-            *t = s;
-        }
-    }
-
-    fn can_be_applied(&self) -> bool {
-        self.is_some()
-    }
 }
 
 pub trait OptionalStructWrapperInternal: Sized + TryInto<<Self as OptionalStructWrapperInternal>::Raw, Error=Self> + Applyable<<Self as OptionalStructWrapperInternal>::Raw> {
@@ -40,16 +12,38 @@ pub struct OptionalBuilder<T> {
     t: T,
 }
 
-impl<T: OptionalStructWrapperInternal<Raw = T>> OptionalBuilder<T> {
-    fn new(t: T) -> Self {
-        OptionalBuilder { t }
+pub struct DefaultOptionalBuilder<R> {
+    r: R,
+}
+
+impl<R> DefaultOptionalBuilder<R> {
+    pub fn new(r: R) -> Self {
+        DefaultOptionalBuilder { r }
     }
-    fn apply(mut self, t: T) -> Self {
-        t.apply_to(&mut self.t);
+    pub fn apply<T: OptionalStructWrapperInternal<Raw=R>>(mut self, t: T) -> Self {
+        t.apply_to(&mut self.r);
         self
     }
 
-    fn build(self) -> Result<T::Raw, T> {
+    pub fn build(self) -> R {
+        self.r
+    }
+}
+
+impl<R, T: OptionalStructWrapperInternal<Raw=R>> OptionalBuilder<T> {
+    pub fn new(t: T) -> Self {
+        OptionalBuilder { t }
+    }
+
+    pub fn with_default(r: R) -> DefaultOptionalBuilder<R> {
+        DefaultOptionalBuilder { r }
+    }
+    pub fn apply(self, _t: T) -> Self {
+        //t.apply_to(&mut self.t);
+        self
+    }
+
+    pub fn build(self) -> Result<T::Raw, T> {
         self.t.try_into()
     }
 }

@@ -15,11 +15,6 @@ const CFG_ATTRIBUTE: &str = "cfg";
 #[cfg(test)]
 mod test;
 
-struct DeriveInputWrapper {
-    orig: DeriveInput,
-    new: DeriveInput,
-}
-
 struct FieldOptions {
     wrapping_behavior: bool,
     cfg_attribute: Option<Attribute>,
@@ -38,7 +33,7 @@ struct GenerateCanConvertImpl {
 impl GenerateCanConvertImpl {
     fn new() -> Self {
         GenerateCanConvertImpl {
-            acc: quote!{ }
+            acc: quote! { }
         }
     }
 
@@ -68,15 +63,15 @@ impl OptionalFieldVisitor for GenerateCanConvertImpl {
         let is_base_opt = is_type_option(&old_field.ty);
         let inc = match (is_base_opt, is_wrapped, is_nested) {
             (_, true, false) =>
-                    quote! { self.#ident.is_some() },
+                quote! { self.#ident.is_some() },
             (_, true, true) =>
-                    quote! { if let Some(i) = &self.#ident { !i.can_convert() } else { false } },
+                quote! { if let Some(i) = &self.#ident { !i.can_convert() } else { false } },
             (_, false, true) =>
-                    quote! { self.#ident.can_convert() },
+                quote! { self.#ident.can_convert() },
             (_, false, false) => quote! { true }
         };
         let acc = &self.acc;
-        self.acc = quote!{
+        self.acc = quote! {
             #acc
             #cfg_attr
             if !#inc {
@@ -190,13 +185,6 @@ impl GenerateApplyFnVisitor {
                 fn apply_to(self, t: &mut #orig_name #ty_generics) {
                     #acc
                 }
-
-                    /*
-                fn can_be_applied(&self) -> bool {
-                    #can_apply_acc
-                    true
-                }
-                     */
             }
         }
     }
@@ -219,15 +207,15 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
                                        (_, None) => {},
                                    }
                                 },
-            (true, false, false) => quote!{
+            (true, false, false) => quote! {
                                     if self.#ident.is_some() {
                                         t.#ident = self.#ident;
                                     }
                                 },
-            (false, false, true) => quote!{ self.#ident.apply_to(&mut t.#ident); },
-            (false, false, false) => quote!{ t.#ident = self.#ident; },
-            (_, true, true) => quote!{ if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } },
-            (_, true, false) => quote!{ if let Some(inner) = self.#ident { t.#ident = inner; } },
+            (false, false, true) => quote! { self.#ident.apply_to(&mut t.#ident); },
+            (false, false, false) => quote! { t.#ident = self.#ident; },
+            (_, true, true) => quote! { if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } },
+            (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
         };
         self.acc = quote! {
             #acc
@@ -309,10 +297,10 @@ fn borrow_fields(derive_input: &mut DeriveInput) -> &mut Punctuated<Field, Comma
     }
 }
 
-fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: &GlobalOptions, derive_input: &DeriveInput) -> DeriveInputWrapper {
+fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: &GlobalOptions, derive_input: &DeriveInput) -> (DeriveInput, DeriveInput) {
     let mut new = derive_input.clone();
-    let mut old = derive_input.clone();
-    let old_fields = borrow_fields(&mut old);
+    let mut orig = derive_input.clone();
+    let old_fields = borrow_fields(&mut orig);
     let new_fields = borrow_fields(&mut new);
 
     for (struct_index, (old_field, new_field)) in old_fields.iter_mut().zip(new_fields.iter_mut()).enumerate() {
@@ -347,50 +335,32 @@ fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: 
             v.visit(&global_options, old_field, new_field, &field_options);
         }
     }
-    DeriveInputWrapper {
-        orig: old,
-        new,
-    }
+    (orig, new)
 }
 
-impl DeriveInputWrapper {
-    fn set_new_name(&mut self, new_name: &str) {
-        self.new.ident = Ident::new(new_name, self.new.ident.span());
-    }
-
-    fn get_derive_macros(
-        &self,
-        extra_derive: &[String],
-    ) -> TokenStream {
-        let mut extra_derive = extra_derive.iter().collect::<HashSet<_>>();
-        for attributes in &self.new.attrs {
-            let _ = attributes.parse_nested_meta(|derived_trait|
-                {
-                    let derived_trait = derived_trait.path;
-                    let full_path = quote! { #derived_trait };
-                    extra_derive.remove(&full_path.to_string());
-                    Ok(())
-                });
-        }
-
-
-        let mut acc = quote! {};
-        for left_trait_to_derive in extra_derive {
-            let left_trait_to_derive = format_ident!("{left_trait_to_derive}");
-            acc = quote! { # left_trait_to_derive, # acc};
-        }
-
-        quote! { #[derive(#acc)] }
+fn get_derive_macros(
+    new: &DeriveInput,
+    extra_derive: &[String],
+) -> TokenStream {
+    let mut extra_derive = extra_derive.iter().collect::<HashSet<_>>();
+    for attributes in &new.attrs {
+        let _ = attributes.parse_nested_meta(|derived_trait|
+            {
+                let derived_trait = derived_trait.path;
+                let full_path = quote! { #derived_trait };
+                extra_derive.remove(&full_path.to_string());
+                Ok(())
+            });
     }
 
 
-    fn finalize_definition(self, macro_parameters: &GlobalOptions) -> (TokenStream, TokenStream) {
-        let derives = self.get_derive_macros(&macro_parameters.extra_derive);
-
-        let orig = self.orig;
-        let new = self.new;
-        (quote! { #orig }, quote! { #derives #new })
+    let mut acc = quote! {};
+    for left_trait_to_derive in extra_derive {
+        let left_trait_to_derive = format_ident!("{left_trait_to_derive}");
+        acc = quote! { # left_trait_to_derive, # acc};
     }
+
+    quote! { #[derive(#acc)] }
 }
 
 struct ParsedMacroParameters {
@@ -539,17 +509,18 @@ pub fn opt_struct(
         &mut can_convert_generator,
     ];
 
-    let mut output = visit_fields(&mut visitors, &macro_params, &derive_input);
+    let (orig, mut new) = visit_fields(&mut visitors, &macro_params, &derive_input);
 
-    output.set_new_name(&macro_params.new_struct_name);
+    new.ident = Ident::new(&macro_params.new_struct_name, new.ident.span());
 
-    let apply_fn_impl = apply_fn_generator.get_implementation(&derive_input, &output.new);
-    let try_from_impl = try_from_generator.get_implementation(&derive_input, &output.new);
-    let can_convert_impl = can_convert_generator.get_implementation(&derive_input, &output.new);
+    let apply_fn_impl = apply_fn_generator.get_implementation(&derive_input, &new);
+    let try_from_impl = try_from_generator.get_implementation(&derive_input, &new);
+    let can_convert_impl = can_convert_generator.get_implementation(&derive_input, &new);
 
-    let (original, new) = output.finalize_definition(&macro_params);
+    let derives = get_derive_macros(&new, &macro_params.extra_derive);
 
     let generated = quote! {
+        #derives
         #new
         #apply_fn_impl
         #try_from_impl
@@ -557,7 +528,7 @@ pub fn opt_struct(
     };
 
     OptionalStructOutput {
-        original,
+        original: quote!{ #orig } ,
         generated,
     }
 }
