@@ -4,46 +4,44 @@ pub trait Applyable<T> {
     fn apply_to(self, t: &mut T);
 }
 
-pub trait OptionalStructWrapperInternal: Sized + TryInto<<Self as OptionalStructWrapperInternal>::Raw, Error=Self> + Applyable<<Self as OptionalStructWrapperInternal>::Raw> {
-    type Raw;
+pub trait OptionalStructWrapperInternal: Sized + TryInto<<Self as OptionalStructWrapperInternal>::Target, Error=Self> + Applyable<<Self as OptionalStructWrapperInternal>::Target> {
+    type Target;
 }
 
 pub struct OptionalBuilder<T> {
-    t: T,
+    opt_struct: T,
 }
 
-pub struct DefaultOptionalBuilder<R> {
-    r: R,
+pub struct DefaultOptionalBuilder<T> {
+    default_struct: T,
 }
 
-impl<R> DefaultOptionalBuilder<R> {
-    pub fn new(r: R) -> Self {
-        DefaultOptionalBuilder { r }
-    }
-    pub fn apply<T: OptionalStructWrapperInternal<Raw=R>>(mut self, t: T) -> Self {
-        t.apply_to(&mut self.r);
+impl<TargetStruct> DefaultOptionalBuilder<TargetStruct> {
+    pub fn apply<T: OptionalStructWrapperInternal<Target=TargetStruct>>(mut self, t: T) -> Self {
+        t.apply_to(&mut self.default_struct);
         self
     }
 
-    pub fn build(self) -> R {
-        self.r
+    pub fn build(self) -> TargetStruct {
+        self.default_struct
     }
 }
 
-impl<R, T: OptionalStructWrapperInternal<Raw=R>> OptionalBuilder<T> {
-    pub fn new(t: T) -> Self {
-        OptionalBuilder { t }
+impl<TargetStruct, OptStruct: OptionalStructWrapperInternal<Target=TargetStruct>> OptionalBuilder<OptStruct> {
+    pub fn new(opt_struct: OptStruct) -> Self {
+        OptionalBuilder { opt_struct }
     }
 
-    pub fn with_default(r: R) -> DefaultOptionalBuilder<R> {
-        DefaultOptionalBuilder { r }
+    pub fn with_default(default_struct: TargetStruct) -> DefaultOptionalBuilder<TargetStruct> {
+        DefaultOptionalBuilder { default_struct }
     }
-    pub fn apply(self, _t: T) -> Self {
-        //t.apply_to(&mut self.t);
+
+    pub fn apply<CollapsableStruct: OptionalStructWrapperInternal<Target=OptStruct>>(mut self, c: CollapsableStruct) -> Self {
+        c.apply_to(&mut self.opt_struct);
         self
     }
 
-    pub fn build(self) -> Result<T::Raw, T> {
-        self.t.try_into()
+    pub fn build(self) -> Result<OptStruct::Target, OptStruct> {
+        self.opt_struct.try_into()
     }
 }
