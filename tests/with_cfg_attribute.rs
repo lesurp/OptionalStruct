@@ -1,3 +1,4 @@
+//#![feature(stmt_expr_attributes)]
 use optional_struct::*;
 
 #[optional_struct]
