@@ -1,6 +1,6 @@
 [package]
 name = "optional_struct"
-version = "0.3.2"
+version = "0.4.0"
 authors = ["Paul Lesur <github@lesurp.fr>"]
 description = """
 Crate defining a macro that will generate, from a structure, another structure with only Option<T> fields
@@ -16,4 +16,4 @@ edition = '2021'
 members = ["export", "implementation"]
 
 [dependencies]
-optional_struct_export = { version = "0.3.2", path = "export" }
+optional_struct_export = { version = "0.4.0", path = "export" }

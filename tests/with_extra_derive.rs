@@ -22,6 +22,6 @@ fn test_apply_options() {
 
     opt_config.apply_to(&mut config);
 
-    assert_eq!(config.delay, None);
+    assert_eq!(config.delay, Some(2));
     assert_eq!(config.path, "/tmp/bar.log");
 }

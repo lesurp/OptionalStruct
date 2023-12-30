@@ -5,6 +5,7 @@ struct Config {
     timeout: Option<u32>,
 
     #[optional_rename(OptionalLogConfig)]
+    #[optional_wrap]
     log_config: LogConfig,
 }
 
@@ -34,7 +35,7 @@ fn test_apply_options() {
 
     opt_config.apply_to(&mut config);
 
-    assert_eq!(config.timeout, None);
+    assert_eq!(config.timeout, Some(2));
     assert_eq!(config.log_config.log_file, "/tmp/bar.log");
     assert_eq!(config.log_config.log_level, 3);
 }

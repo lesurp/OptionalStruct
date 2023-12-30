@@ -22,6 +22,6 @@ fn test_skip_wrapping() {
 
     opt_config.apply_to(&mut config);
 
-    assert_eq!(config.timeout, None);
+    assert_eq!(config.timeout, Some(2));
     assert!(!config.not_optional_at_all);
 }
