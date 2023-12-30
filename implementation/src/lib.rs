@@ -165,41 +165,53 @@ impl OptionalFieldVisitor for GenerateTryFromImpl {
 
 
 struct GenerateApplyFnVisitor {
-    acc: TokenStream,
+    acc_concrete: TokenStream,
+    acc_opt: TokenStream,
 }
 
 impl GenerateApplyFnVisitor {
     fn new() -> Self {
         GenerateApplyFnVisitor {
-            acc: quote! {},
+            acc_concrete: quote! {},
+            acc_opt: quote! {},
         }
     }
 
     fn get_implementation(self, orig: &DeriveInput, new: &DeriveInput) -> TokenStream {
-        let (impl_generics, ty_generics, where_clause) = orig.generics.split_for_impl();
+        let (impl_generics, ty_generics, _) = orig.generics.split_for_impl();
         let orig_name = &orig.ident;
         let new_name = &new.ident;
-        let acc = self.acc;
+        let acc_concrete = self.acc_concrete;
+        let acc_opt = self.acc_opt;
         quote! {
-            impl #impl_generics Applyable<#orig_name #ty_generics> #where_clause for #new_name #ty_generics {
+            impl #impl_generics #new_name #ty_generics {
+                fn build(self, mut t: #orig_name #ty_generics) -> #orig_name #ty_generics {
+                    self.apply_to(&mut t);
+                    t
+                }
+
                 fn apply_to(self, t: &mut #orig_name #ty_generics) {
-                    #acc
+                    #acc_concrete
+                }
+
+                fn try_build(self) -> Result<#orig_name #ty_generics, Self> {
+                    self.try_into()
+                }
+
+                fn apply_to_opt(self, t: &mut Self) {
+                    #acc_opt
+                }
+
+                fn apply(mut self, t: Self) -> Self {
+                    t.apply_to_opt(&mut self);
+                    self
                 }
             }
         }
     }
-}
 
-impl OptionalFieldVisitor for GenerateApplyFnVisitor {
-    fn visit(&mut self, _global_options: &GlobalOptions, old_field: &mut Field, _new_field: &mut Field, field_options: &FieldOptions) {
-        let ident = &field_options.field_ident;
-        let acc = &self.acc;
-        let cfg_attr = &field_options.cfg_attribute;
-
-        let is_wrapped = field_options.wrapping_behavior;
-        let is_nested = field_options.new_type.is_some();
-        let is_base_opt = is_type_option(&old_field.ty);
-        let inc = match (is_base_opt, is_wrapped, is_nested) {
+    fn get_incremental_setter_concrete(ident: &TokenStream, is_wrapped: bool, is_nested: bool, is_base_opt: bool) -> TokenStream {
+        match (is_base_opt, is_wrapped, is_nested) {
             (true, false, true) => quote! {
                                    match (&mut t.#ident, self.#ident) {
                                        (None, Some(nested)) => t.#ident = nested.#ident.try_into(),
@@ -216,12 +228,57 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
             (false, false, false) => quote! { t.#ident = self.#ident; },
             (_, true, true) => quote! { if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } },
             (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
-        };
-        self.acc = quote! {
-            #acc
+        }
+    }
+    fn get_incremental_setter_opt(ident: &TokenStream, is_wrapped: bool, is_nested: bool, is_base_opt: bool) -> TokenStream {
+        match (is_base_opt, is_wrapped, is_nested) {
+            (true, false, true) => quote! {
+                                   match (&mut t.#ident, self.#ident) {
+                                       (None, Some(nested)) => t.#ident = Some(nested),
+                                       (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
+                                       (_, None) => {},
+                                   }
+                                },
+            (true, false, false) => quote! {
+                                    if self.#ident.is_some() {
+                                        t.#ident = self.#ident;
+                                    }
+                                },
+            (false, false, true) => quote! { self.#ident.apply_to_opt(&mut t.#ident); },
+            (false, false, false) => quote! { t.#ident = self.#ident; },
+            (_, true, true) => quote! { if let Some(inner) = self.#ident { inner.apply_to_opt(&mut t.#ident); } },
+            (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
+        }
+    }
+}
+
+impl OptionalFieldVisitor for GenerateApplyFnVisitor {
+    fn visit(&mut self, _global_options: &GlobalOptions, old_field: &mut Field, _new_field: &mut Field, field_options: &FieldOptions) {
+        let ident = &field_options.field_ident;
+        let cfg_attr = &field_options.cfg_attribute;
+
+        let is_wrapped = field_options.wrapping_behavior;
+        let is_nested = field_options.new_type.is_some();
+        let is_base_opt = is_type_option(&old_field.ty);
+
+        let inc_concrete = Self::get_incremental_setter_concrete(ident, is_wrapped, is_nested, is_base_opt);
+        // Opt <-> Opt is never wrapped. But both have an Option<> if the initial type IS wrapped!
+        let inc_opt = Self::get_incremental_setter_opt(ident, false, is_nested, is_wrapped || is_base_opt);
+
+        let acc_concrete = &self.acc_concrete;
+        self.acc_concrete = quote! {
+            #acc_concrete
 
             #cfg_attr
-            #inc
+            #inc_concrete
+        };
+
+        let acc_opt = &self.acc_opt;
+        self.acc_opt = quote! {
+            #acc_opt
+
+            #cfg_attr
+            #inc_opt
         };
     }
 }
@@ -466,24 +523,6 @@ impl GlobalOptions {
     }
 }
 
-/*
-// TODO: copy pasted code
-let can_apply_acc = match &fields {
-    Fields::Unit => unreachable!(),
-    Fields::Named(fields_named) => {
-        let it = fields_named.named.iter().map(|f| (f.ident.as_ref().unwrap(), &f.attrs));
-        acc_check::<_, _, Ident>(it)
-    }
-    Fields::Unnamed(fields_unnamed) => {
-        let it = fields_unnamed.unnamed.iter().enumerate().map(|(i, field)| {
-            let i = syn::Index::from(i);
-            (quote! {#i}, &field.attrs)
-        });
-        acc_check(it)
-    }
-};
-*/
-
 pub struct OptionalStructOutput {
     pub original: TokenStream,
     pub generated: TokenStream,
@@ -528,7 +567,7 @@ pub fn opt_struct(
     };
 
     OptionalStructOutput {
-        original: quote!{ #orig } ,
+        original: quote! { #orig },
         generated,
     }
 }
