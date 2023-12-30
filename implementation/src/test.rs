@@ -13,6 +13,16 @@ fn basic_gen() {
 }
 
 #[test]
+fn with_nested() {
+    opt_struct(quote!(), quote!(
+        struct Foo {
+            #[optional_rename(OptionalBar)]
+           baz: Bar
+        }
+    ));
+}
+
+#[test]
 fn with_redundant_derive() {
     opt_struct(quote!(), quote!(
         #[derive(Debug, Clone)]
