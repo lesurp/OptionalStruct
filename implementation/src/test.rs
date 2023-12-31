@@ -17,7 +17,19 @@ fn with_nested() {
     opt_struct(quote!(), quote!(
         struct Foo {
             #[optional_rename(OptionalBar)]
-           baz: Bar
+           bar: Bar
+        }
+    ));
+}
+
+#[test]
+fn with_serde_skip() {
+    opt_struct(quote!(), quote!(
+        struct Foo {
+            #[optional_serde_skip_none]
+           baz: Baz,
+            #[optional_serde_skip_none]
+           bar: Option<Bar>,
         }
     ));
 }
