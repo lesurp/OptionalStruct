@@ -181,6 +181,14 @@ fn main() {
 }
 ```
 
+6. Add serde's `skip_serializing_if = "Option::is_none"` attribute to generated
+struct
+
+By adding the attribute `#[optional_serde_skip_none]` to a field, the generated
+struct will have the same field tagged `#[serde(skip_serializing_if = "Option::is_none")]`.
+This attribute makes serde skip fields entirely if the value of the `Option` is
+none (rather than saving e.g. `"value" = null` if serializing to json).
+
 ## `apply`, `build`, and `try_build`
 
 Those three functions are used to build the final version of the structure, by
