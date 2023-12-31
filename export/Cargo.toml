@@ -1,6 +1,6 @@
 [package]
 name = "optional_struct_export"
-version = "0.4.0"
+version = "0.4.1"
 edition = "2021"
 description = "Helper crate exporting the proc_macro as an actual proc_macro for the optional_struct crate"
 license = "Apache-2.0"
@@ -9,7 +9,7 @@ repository = "https://github.com/lesurp/OptionalStruct"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-optional_struct_macro_impl = { version = "0.4.0", path = "../implementation" }
+optional_struct_macro_impl = { version = "0.4.1", path = "../implementation" }
 quote = { version = "1.0.33", features = [] }
 
 [lib]
