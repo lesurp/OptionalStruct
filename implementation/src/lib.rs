@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use proc_macro2::{TokenStream, TokenTree};
 use quote::{format_ident, quote};
-use syn::{Attribute, Data, DeriveInput, Field, Fields, Ident, Path, spanned::Spanned, Token, Type, Visibility};
+use syn::{Attribute, Data, DeriveInput, Field, Fields, Ident, parse_quote, Path, spanned::Spanned, Token, Type, Visibility};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
@@ -10,6 +10,7 @@ use syn::token::Comma;
 const RENAME_ATTRIBUTE: &str = "optional_rename";
 const SKIP_WRAP_ATTRIBUTE: &str = "optional_skip_wrap";
 const WRAP_ATTRIBUTE: &str = "optional_wrap";
+const SERDE_SKIP_SERIALIZING_NONE: &str = "optional_serde_skip_none";
 const CFG_ATTRIBUTE: &str = "cfg";
 
 #[cfg(test)]
@@ -17,6 +18,7 @@ mod test;
 
 struct FieldOptions {
     wrapping_behavior: bool,
+    serde_skip: bool,
     cfg_attribute: Option<Attribute>,
     new_type: Option<TokenTree>,
     field_ident: TokenStream,
@@ -311,6 +313,17 @@ impl OptionalFieldVisitor for SetNewFieldTypeVisitor {
     }
 }
 
+struct AddSerdeSkipAttribute;
+
+impl OptionalFieldVisitor for AddSerdeSkipAttribute {
+    fn visit(&mut self, _global_options: &GlobalOptions, _old_field: &mut Field, new_field: &mut Field, field_options: &FieldOptions) {
+        if !field_options.serde_skip { return; }
+
+        let attribute : Attribute = parse_quote!{ #[serde(skip_serializing_if = "Option::is_none")] };
+        new_field.attrs.push(attribute);
+    }
+}
+
 // https://github.com/rust-lang/rust/issues/65823 :(
 struct RemoveHelperAttributesVisitor;
 
@@ -326,6 +339,8 @@ impl OptionalFieldVisitor for RemoveHelperAttributesVisitor {
                 } else if a.path().is_ident(SKIP_WRAP_ATTRIBUTE) {
                     Some(i)
                 } else if a.path().is_ident(WRAP_ATTRIBUTE) {
+                    Some(i)
+                } else if a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE) {
                     Some(i)
                 } else {
                     None
@@ -364,6 +379,7 @@ fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: 
         let mut wrapping_behavior = !is_type_option(&old_field.ty) && global_options.default_wrapping_behavior;
         let mut cfg_attribute = None;
         let mut new_type = None;
+        let mut serde_skip = false;
         old_field.attrs
             .iter()
             .for_each(|a| {
@@ -377,6 +393,8 @@ fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: 
                     wrapping_behavior = false;
                 } else if a.path().is_ident(WRAP_ATTRIBUTE) {
                     wrapping_behavior = true;
+                } else if a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE) {
+                    serde_skip = true;
                 } else if a.path().is_ident(CFG_ATTRIBUTE) {
                     cfg_attribute = Some(a.clone());
                 }
@@ -387,7 +405,7 @@ fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: 
             let i = syn::Index::from(struct_index);
             quote! {#i}
         };
-        let field_options = FieldOptions { wrapping_behavior, cfg_attribute, new_type, field_ident };
+        let field_options = FieldOptions { wrapping_behavior, cfg_attribute, new_type, field_ident, serde_skip };
         for v in &mut *visitors {
             v.visit(&global_options, old_field, new_field, &field_options);
         }
@@ -543,6 +561,7 @@ pub fn opt_struct(
         &mut RemoveHelperAttributesVisitor as &mut dyn OptionalFieldVisitor,
         &mut SetNewFieldVisibilityVisitor,
         &mut SetNewFieldTypeVisitor,
+        &mut AddSerdeSkipAttribute,
         &mut apply_fn_generator,
         &mut try_from_generator,
         &mut can_convert_generator,
