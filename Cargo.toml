@@ -17,7 +17,7 @@ members = ["export", "implementation"]
 
 [dependencies]
 optional_struct_export = { version = "0.4.1", path = "export" }
-serde = { version = "1.0.193", features = ["derive"] }
+serde = { version = "1.0.193", features = ["derive"], default-features = false }
 
 [dev-dependencies]
 serde = "1.0.193"
