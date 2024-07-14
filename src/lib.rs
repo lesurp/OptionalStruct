@@ -1,8 +1,7 @@
 #![no_std]
 pub use optional_struct_export::optional_struct;
 
-
-pub trait Applicable : Sized {
+pub trait Applicable: Sized {
     type Base;
 
     fn build(self, mut base: Self::Base) -> Self::Base {

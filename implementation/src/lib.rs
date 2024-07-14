@@ -2,10 +2,13 @@ use std::collections::HashSet;
 
 use proc_macro2::{TokenStream, TokenTree};
 use quote::{format_ident, quote};
-use syn::{Attribute, Data, DeriveInput, Field, Fields, Ident, parse_quote, Path, spanned::Spanned, Token, Type, Visibility};
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
+use syn::{
+    parse_quote, spanned::Spanned, Attribute, Data, DeriveInput, Field, Fields, Ident, Path, Token,
+    Type, Visibility,
+};
 
 const RENAME_ATTRIBUTE: &str = "optional_rename";
 const SKIP_WRAP_ATTRIBUTE: &str = "optional_skip_wrap";
@@ -25,7 +28,13 @@ struct FieldOptions {
 }
 
 trait OptionalFieldVisitor {
-    fn visit(&mut self, global_options: &GlobalOptions, old_field: &mut Field, new_field: &mut Field, field_options: &FieldOptions);
+    fn visit(
+        &mut self,
+        global_options: &GlobalOptions,
+        old_field: &mut Field,
+        new_field: &mut Field,
+        field_options: &FieldOptions,
+    );
 }
 
 struct GenerateCanConvertImpl {
@@ -34,9 +43,7 @@ struct GenerateCanConvertImpl {
 
 impl GenerateCanConvertImpl {
     fn new() -> Self {
-        GenerateCanConvertImpl {
-            acc: quote! { }
-        }
+        GenerateCanConvertImpl { acc: quote! {} }
     }
 
     fn get_implementation(self, derive_input: &DeriveInput, new: &DeriveInput) -> TokenStream {
@@ -56,7 +63,13 @@ impl GenerateCanConvertImpl {
 }
 
 impl OptionalFieldVisitor for GenerateCanConvertImpl {
-    fn visit(&mut self, _global_options: &GlobalOptions, old_field: &mut Field, _new_field: &mut Field, field_options: &FieldOptions) {
+    fn visit(
+        &mut self,
+        _global_options: &GlobalOptions,
+        old_field: &mut Field,
+        _new_field: &mut Field,
+        field_options: &FieldOptions,
+    ) {
         let ident = &field_options.field_ident;
         let cfg_attr = &field_options.cfg_attribute;
 
@@ -64,13 +77,12 @@ impl OptionalFieldVisitor for GenerateCanConvertImpl {
         let is_nested = field_options.new_type.is_some();
         let is_base_opt = is_type_option(&old_field.ty);
         let inc = match (is_base_opt, is_wrapped, is_nested) {
-            (_, true, false) =>
-                quote! { self.#ident.is_some() },
-            (_, true, true) =>
-                quote! { if let Some(i) = &self.#ident { !i.can_convert() } else { false } },
-            (_, false, true) =>
-                quote! { self.#ident.can_convert() },
-            (_, false, false) => quote! { true }
+            (_, true, false) => quote! { self.#ident.is_some() },
+            (_, true, true) => {
+                quote! { if let Some(i) = &self.#ident { !i.can_convert() } else { false } }
+            }
+            (_, false, true) => quote! { self.#ident.can_convert() },
+            (_, false, false) => quote! { true },
         };
         let acc = &self.acc;
         self.acc = quote! {
@@ -104,22 +116,28 @@ impl GenerateTryFromImpl {
         let field_assign_acc = self.field_assign_acc;
 
         quote! {
-            impl #impl_generics TryFrom<#new_name #ty_generics > #where_clause for #old_name #ty_generics {
-                type Error = #new_name #ty_generics;
+                impl #impl_generics TryFrom<#new_name #ty_generics > #where_clause for #old_name #ty_generics {
+                    type Error = #new_name #ty_generics;
 
-                fn try_from(v: Self::Error) -> Result<Self, Self::Error> {
-                    #field_check_acc
-                    Ok(Self {
-                        #field_assign_acc
-                    })
+                    fn try_from(v: Self::Error) -> Result<Self, Self::Error> {
+                        #field_check_acc
+                        Ok(Self {
+                            #field_assign_acc
+                        })
+                    }
                 }
-            }
-    }
+        }
     }
 }
 
 impl OptionalFieldVisitor for GenerateTryFromImpl {
-    fn visit(&mut self, _global_options: &GlobalOptions, old_field: &mut Field, _new_field: &mut Field, field_options: &FieldOptions) {
+    fn visit(
+        &mut self,
+        _global_options: &GlobalOptions,
+        old_field: &mut Field,
+        _new_field: &mut Field,
+        field_options: &FieldOptions,
+    ) {
         let ident = &field_options.field_ident;
         let cfg_attr = &field_options.cfg_attribute;
 
@@ -127,26 +145,19 @@ impl OptionalFieldVisitor for GenerateTryFromImpl {
         let is_nested = field_options.new_type.is_some();
         let is_base_opt = is_type_option(&old_field.ty);
         let (unwrap, check) = match (is_base_opt, is_wrapped, is_nested) {
-            (_, true, false) =>
-                (
-                    quote! { .unwrap() },
-                    quote! { #cfg_attr if v.#ident.is_none() { return Err(v); } }
-                ),
-            (_, true, true) =>
-                (
-                    quote! { .unwrap().try_into().unwrap() },
-                    quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } }
-                ),
-            (_, false, true) =>
-                (
-                    quote! { .try_into().unwrap() },
-                    quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } }
-                ),
-            (_, false, false) =>
-                (
-                    quote! {},
-                    quote! {}
-                )
+            (_, true, false) => (
+                quote! { .unwrap() },
+                quote! { #cfg_attr if v.#ident.is_none() { return Err(v); } },
+            ),
+            (_, true, true) => (
+                quote! { .unwrap().try_into().unwrap() },
+                quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } },
+            ),
+            (_, false, true) => (
+                quote! { .try_into().unwrap() },
+                quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } },
+            ),
+            (_, false, false) => (quote! {}, quote! {}),
         };
 
         let field_assign_acc = &self.field_assign_acc;
@@ -164,7 +175,6 @@ impl OptionalFieldVisitor for GenerateTryFromImpl {
         };
     }
 }
-
 
 struct GenerateApplyFnVisitor {
     acc_concrete: TokenStream,
@@ -202,50 +212,70 @@ impl GenerateApplyFnVisitor {
         }
     }
 
-    fn get_incremental_setter_concrete(ident: &TokenStream, is_wrapped: bool, is_nested: bool, is_base_opt: bool) -> TokenStream {
+    fn get_incremental_setter_concrete(
+        ident: &TokenStream,
+        is_wrapped: bool,
+        is_nested: bool,
+        is_base_opt: bool,
+    ) -> TokenStream {
         match (is_base_opt, is_wrapped, is_nested) {
             (true, false, true) => quote! {
-                                   match (&mut t.#ident, self.#ident) {
-                                       (None, Some(nested)) => t.#ident = nested.#ident.try_into(),
-                                       (Some(existing), Some(nested)) => nested.#ident.apply_to(existing),
-                                       (_, None) => {},
-                                   }
-                                },
+               match (&mut t.#ident, self.#ident) {
+                   (None, Some(nested)) => t.#ident = nested.#ident.try_into(),
+                   (Some(existing), Some(nested)) => nested.#ident.apply_to(existing),
+                   (_, None) => {},
+               }
+            },
             (true, false, false) => quote! {
-                                    if self.#ident.is_some() {
-                                        t.#ident = self.#ident;
-                                    }
-                                },
+                if self.#ident.is_some() {
+                    t.#ident = self.#ident;
+                }
+            },
             (false, false, true) => quote! { self.#ident.apply_to(&mut t.#ident); },
             (false, false, false) => quote! { t.#ident = self.#ident; },
-            (_, true, true) => quote! { if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } },
+            (_, true, true) => {
+                quote! { if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } }
+            }
             (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
         }
     }
-    fn get_incremental_setter_opt(ident: &TokenStream, is_wrapped: bool, is_nested: bool, is_base_opt: bool) -> TokenStream {
+    fn get_incremental_setter_opt(
+        ident: &TokenStream,
+        is_wrapped: bool,
+        is_nested: bool,
+        is_base_opt: bool,
+    ) -> TokenStream {
         match (is_base_opt, is_wrapped, is_nested) {
             (true, false, true) => quote! {
-                                   match (&mut t.#ident, self.#ident) {
-                                       (None, Some(nested)) => t.#ident = Some(nested),
-                                       (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
-                                       (_, None) => {},
-                                   }
-                                },
+               match (&mut t.#ident, self.#ident) {
+                   (None, Some(nested)) => t.#ident = Some(nested),
+                   (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
+                   (_, None) => {},
+               }
+            },
             (true, false, false) => quote! {
-                                    if self.#ident.is_some() {
-                                        t.#ident = self.#ident;
-                                    }
-                                },
+                if self.#ident.is_some() {
+                    t.#ident = self.#ident;
+                }
+            },
             (false, false, true) => quote! { self.#ident.apply_to_opt(&mut t.#ident); },
             (false, false, false) => quote! { t.#ident = self.#ident; },
-            (_, true, true) => quote! { if let Some(inner) = self.#ident { inner.apply_to_opt(&mut t.#ident); } },
+            (_, true, true) => {
+                quote! { if let Some(inner) = self.#ident { inner.apply_to_opt(&mut t.#ident); } }
+            }
             (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
         }
     }
 }
 
 impl OptionalFieldVisitor for GenerateApplyFnVisitor {
-    fn visit(&mut self, _global_options: &GlobalOptions, old_field: &mut Field, _new_field: &mut Field, field_options: &FieldOptions) {
+    fn visit(
+        &mut self,
+        _global_options: &GlobalOptions,
+        old_field: &mut Field,
+        _new_field: &mut Field,
+        field_options: &FieldOptions,
+    ) {
         let ident = &field_options.field_ident;
         let cfg_attr = &field_options.cfg_attribute;
 
@@ -253,9 +283,11 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
         let is_nested = field_options.new_type.is_some();
         let is_base_opt = is_type_option(&old_field.ty);
 
-        let inc_concrete = Self::get_incremental_setter_concrete(ident, is_wrapped, is_nested, is_base_opt);
+        let inc_concrete =
+            Self::get_incremental_setter_concrete(ident, is_wrapped, is_nested, is_base_opt);
         // Opt <-> Opt is never wrapped. But both have an Option<> if the initial type IS wrapped!
-        let inc_opt = Self::get_incremental_setter_opt(ident, false, is_nested, is_wrapped || is_base_opt);
+        let inc_opt =
+            Self::get_incremental_setter_opt(ident, false, is_nested, is_wrapped || is_base_opt);
 
         let acc_concrete = &self.acc_concrete;
         self.acc_concrete = quote! {
@@ -278,7 +310,13 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
 struct SetNewFieldVisibilityVisitor;
 
 impl OptionalFieldVisitor for SetNewFieldVisibilityVisitor {
-    fn visit(&mut self, global_options: &GlobalOptions, _old_field: &mut Field, new_field: &mut Field, _field_options: &FieldOptions) {
+    fn visit(
+        &mut self,
+        global_options: &GlobalOptions,
+        _old_field: &mut Field,
+        new_field: &mut Field,
+        _field_options: &FieldOptions,
+    ) {
         if global_options.make_fields_public {
             new_field.vis = Visibility::Public(syn::token::Pub(new_field.vis.span()))
         }
@@ -288,7 +326,13 @@ impl OptionalFieldVisitor for SetNewFieldVisibilityVisitor {
 struct SetNewFieldTypeVisitor;
 
 impl OptionalFieldVisitor for SetNewFieldTypeVisitor {
-    fn visit(&mut self, _global_options: &GlobalOptions, old_field: &mut Field, new_field: &mut Field, field_options: &FieldOptions) {
+    fn visit(
+        &mut self,
+        _global_options: &GlobalOptions,
+        old_field: &mut Field,
+        new_field: &mut Field,
+        field_options: &FieldOptions,
+    ) {
         let mut new_type = if let Some(t) = &field_options.new_type {
             quote! {#t}
         } else {
@@ -306,10 +350,19 @@ impl OptionalFieldVisitor for SetNewFieldTypeVisitor {
 struct AddSerdeSkipAttribute;
 
 impl OptionalFieldVisitor for AddSerdeSkipAttribute {
-    fn visit(&mut self, _global_options: &GlobalOptions, _old_field: &mut Field, new_field: &mut Field, field_options: &FieldOptions) {
-        if !field_options.serde_skip { return; }
+    fn visit(
+        &mut self,
+        _global_options: &GlobalOptions,
+        _old_field: &mut Field,
+        new_field: &mut Field,
+        field_options: &FieldOptions,
+    ) {
+        if !field_options.serde_skip {
+            return;
+        }
 
-        let attribute : Attribute = parse_quote!{ #[serde(skip_serializing_if = "Option::is_none")] };
+        let attribute: Attribute =
+            parse_quote! { #[serde(skip_serializing_if = "Option::is_none")] };
         new_field.attrs.push(attribute);
     }
 }
@@ -318,7 +371,13 @@ impl OptionalFieldVisitor for AddSerdeSkipAttribute {
 struct RemoveHelperAttributesVisitor;
 
 impl OptionalFieldVisitor for RemoveHelperAttributesVisitor {
-    fn visit(&mut self, _global_options: &GlobalOptions, old_field: &mut Field, new_field: &mut Field, _field_options: &FieldOptions) {
+    fn visit(
+        &mut self,
+        _global_options: &GlobalOptions,
+        old_field: &mut Field,
+        new_field: &mut Field,
+        _field_options: &FieldOptions,
+    ) {
         let indexes_to_remove = old_field
             .attrs
             .iter()
@@ -359,14 +418,21 @@ fn borrow_fields(derive_input: &mut DeriveInput) -> &mut Punctuated<Field, Comma
     }
 }
 
-fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: &GlobalOptions, derive_input: &DeriveInput) -> (DeriveInput, DeriveInput) {
+fn visit_fields(
+    visitors: &mut [&mut dyn OptionalFieldVisitor],
+    global_options: &GlobalOptions,
+    derive_input: &DeriveInput,
+) -> (DeriveInput, DeriveInput) {
     let mut new = derive_input.clone();
     let mut orig = derive_input.clone();
     let old_fields = borrow_fields(&mut orig);
     let new_fields = borrow_fields(&mut new);
 
-    for (struct_index, (old_field, new_field)) in old_fields.iter_mut().zip(new_fields.iter_mut()).enumerate() {
-        let mut wrapping_behavior = !is_type_option(&old_field.ty) && global_options.default_wrapping_behavior;
+    for (struct_index, (old_field, new_field)) in
+        old_fields.iter_mut().zip(new_fields.iter_mut()).enumerate()
+    {
+        let mut wrapping_behavior =
+            !is_type_option(&old_field.ty) && global_options.default_wrapping_behavior;
         let mut cfg_attribute = None;
         let mut new_type = None;
         let mut serde_skip = false;
@@ -395,7 +461,13 @@ fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: 
             let i = syn::Index::from(struct_index);
             quote! {#i}
         };
-        let field_options = FieldOptions { wrapping_behavior, cfg_attribute, new_type, field_ident, serde_skip };
+        let field_options = FieldOptions {
+            wrapping_behavior,
+            cfg_attribute,
+            new_type,
+            field_ident,
+            serde_skip,
+        };
         for v in &mut *visitors {
             v.visit(&global_options, old_field, new_field, &field_options);
         }
@@ -403,21 +475,16 @@ fn visit_fields(visitors: &mut [&mut dyn OptionalFieldVisitor], global_options: 
     (orig, new)
 }
 
-fn get_derive_macros(
-    new: &DeriveInput,
-    extra_derive: &[String],
-) -> TokenStream {
+fn get_derive_macros(new: &DeriveInput, extra_derive: &[String]) -> TokenStream {
     let mut extra_derive = extra_derive.iter().collect::<HashSet<_>>();
     for attributes in &new.attrs {
-        let _ = attributes.parse_nested_meta(|derived_trait|
-            {
-                let derived_trait = derived_trait.path;
-                let full_path = quote! { #derived_trait };
-                extra_derive.remove(&full_path.to_string());
-                Ok(())
-            });
+        let _ = attributes.parse_nested_meta(|derived_trait| {
+            let derived_trait = derived_trait.path;
+            let full_path = quote! { #derived_trait };
+            extra_derive.remove(&full_path.to_string());
+            Ok(())
+        });
     }
-
 
     let mut acc = quote! {};
     for left_trait_to_derive in extra_derive {
@@ -517,7 +584,9 @@ struct GlobalOptions {
 
 impl GlobalOptions {
     fn new(attr: ParsedMacroParameters, struct_definition: &DeriveInput) -> Self {
-        let new_struct_name = attr.new_struct_name.unwrap_or_else(|| "Optional".to_owned() + &struct_definition.ident.to_string());
+        let new_struct_name = attr
+            .new_struct_name
+            .unwrap_or_else(|| "Optional".to_owned() + &struct_definition.ident.to_string());
         let default_wrapping_behavior = attr.default_wrapping;
         GlobalOptions {
             new_struct_name,
@@ -536,10 +605,7 @@ pub struct OptionalStructOutput {
     pub generated: TokenStream,
 }
 
-pub fn opt_struct(
-    attr: TokenStream,
-    input: TokenStream,
-) -> OptionalStructOutput {
+pub fn opt_struct(attr: TokenStream, input: TokenStream) -> OptionalStructOutput {
     let derive_input = syn::parse2::<DeriveInput>(input).unwrap();
     let macro_params = GlobalOptions::new(syn::parse2::<_>(attr).unwrap(), &derive_input);
 

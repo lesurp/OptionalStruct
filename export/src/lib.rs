@@ -15,4 +15,3 @@ pub fn optional_struct(
         #generated
     })
 }
-

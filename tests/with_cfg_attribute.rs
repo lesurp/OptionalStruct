@@ -11,12 +11,8 @@ struct Foo {
 
 #[test]
 fn test_match_cfg_attributes() {
-    let mut foo = Foo {
-        bar: 1
-    };
+    let mut foo = Foo { bar: 1 };
 
-    let opt_foo = OptionalFoo {
-        bar: Some(1),
-    };
+    let opt_foo = OptionalFoo { bar: Some(1) };
     opt_foo.apply_to(&mut foo);
 }

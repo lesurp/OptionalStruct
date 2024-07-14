@@ -1,6 +1,6 @@
-use serde_json::json;
 use optional_struct_export::optional_struct;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
 #[optional_struct]
 #[derive(Serialize, Deserialize)]
@@ -21,9 +21,12 @@ fn test_serde_skip() {
     };
 
     let serialized = serde_json::to_value(&opt).unwrap();
-    assert_eq!(serialized, json!(
-        {
-            "meow": 0.5
-        }
-    ));
+    assert_eq!(
+        serialized,
+        json!(
+            {
+                "meow": 0.5
+            }
+        )
+    );
 }

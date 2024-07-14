@@ -25,10 +25,7 @@ fn test_builder() {
         paf: 12,
         bar: None,
         baz: Some('a'),
-        miaou: Miaou {
-            a: 1,
-            b: -1,
-        },
+        miaou: Miaou { a: 1, b: -1 },
     };
 
     let first = OptionalFoo {
@@ -49,10 +46,13 @@ fn test_builder() {
     };
 
     let collapsed = first.apply(second).build(default);
-    assert_eq!(collapsed, Foo {
-        paf: 24,
-        bar: Some(7),
-        baz: Some('c'),
-        miaou: Miaou { a: 2, b: -1 },
-    });
+    assert_eq!(
+        collapsed,
+        Foo {
+            paf: 24,
+            bar: Some(7),
+            baz: Some('c'),
+            miaou: Miaou { a: 2, b: -1 },
+        }
+    );
 }
