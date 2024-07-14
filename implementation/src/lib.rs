@@ -185,28 +185,18 @@ impl GenerateApplyFnVisitor {
         let new_name = &new.ident;
         let acc_concrete = self.acc_concrete;
         let acc_opt = self.acc_opt;
+        // TODO: everything was written with "t" as the parameter name, but this a. does not match
+        // the trait and b. is not explicit enough. Make this some parameter instead.
         quote! {
-            impl #impl_generics #new_name #ty_generics {
-                fn build(self, mut t: #orig_name #ty_generics) -> #orig_name #ty_generics {
-                    self.apply_to(&mut t);
-                    t
-                }
+            impl #impl_generics optional_struct::Applicable for #new_name #ty_generics {
+                type Base = #orig_name #ty_generics;
 
-                fn apply_to(self, t: &mut #orig_name #ty_generics) {
+                fn apply_to(self, t: &mut Self::Base) {
                     #acc_concrete
-                }
-
-                fn try_build(self) -> Result<#orig_name #ty_generics, Self> {
-                    self.try_into()
                 }
 
                 fn apply_to_opt(self, t: &mut Self) {
                     #acc_opt
-                }
-
-                fn apply(mut self, t: Self) -> Self {
-                    t.apply_to_opt(&mut self);
-                    self
                 }
             }
         }
