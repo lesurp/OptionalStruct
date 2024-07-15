@@ -97,3 +97,17 @@ fn with_cfg_attributes() {
         ),
     );
 }
+
+#[test]
+fn with_nested_option_skip_wrap() {
+    opt_struct(
+        quote!(),
+        quote!(
+            struct Foo {
+                #[optional_rename(OptionalInner)]
+                #[optional_skip_wrap]
+                inner: Option<Inner>,
+            }
+        ),
+    );
+}
