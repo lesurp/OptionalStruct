@@ -1,5 +1,6 @@
 #![no_std]
-pub use optional_struct_export::optional_struct;
+
+pub use optional_struct_macro::optional_struct;
 
 pub trait Applicable: Sized {
     type Base;

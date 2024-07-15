@@ -13,10 +13,10 @@ repository = "https://github.com/lesurp/OptionalStruct"
 edition = '2021'
 
 [workspace]
-members = ["export", "implementation"]
+members = ["optional_struct_macro"]
 
 [dependencies]
-optional_struct_export = { version = "0.4.1", path = "export" }
+optional_struct_macro = { version = "0.4.1", path = "optional_struct_macro" }
 serde = { version = "1.0.193", features = ["derive"], default-features = false }
 
 [dev-dependencies]

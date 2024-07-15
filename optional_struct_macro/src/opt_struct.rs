@@ -16,9 +16,6 @@ const WRAP_ATTRIBUTE: &str = "optional_wrap";
 const SERDE_SKIP_SERIALIZING_NONE: &str = "optional_serde_skip_none";
 const CFG_ATTRIBUTE: &str = "cfg";
 
-#[cfg(test)]
-mod test;
-
 struct FieldOptions {
     wrapping_behavior: bool,
     serde_skip: bool,
@@ -646,3 +643,5 @@ pub fn opt_struct(attr: TokenStream, input: TokenStream) -> OptionalStructOutput
         generated,
     }
 }
+
+

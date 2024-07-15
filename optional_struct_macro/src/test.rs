@@ -1,6 +1,6 @@
 use quote::quote;
 
-use crate::opt_struct;
+use crate::opt_struct::opt_struct;
 
 #[test]
 fn basic_gen() {
