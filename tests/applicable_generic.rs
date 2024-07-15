@@ -31,4 +31,3 @@ fn test_apply_options() {
     assert_eq!(config.path, "/tmp/bar.log");
     assert_eq!(config.percentage, 42.24);
 }
-
