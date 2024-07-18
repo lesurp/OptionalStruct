@@ -146,11 +146,19 @@ impl OptionalFieldVisitor for GenerateTryFromImpl {
                 quote! { .unwrap() },
                 quote! { #cfg_attr if v.#ident.is_none() { return Err(v); } },
             ),
-            (_, true, true) => (
+            (true, true, true) => (
+                quote! { .unwrap().try_into().ok() },
+                quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } },
+            ),
+            (false, true, true) => (
                 quote! { .unwrap().try_into().unwrap() },
                 quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } },
             ),
-            (_, false, true) => (
+            (true, false, true) => (
+                quote! { .try_into().ok() },
+                quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } },
+            ),
+            (false, false, true) => (
                 quote! { .try_into().unwrap() },
                 quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } },
             ),
@@ -217,11 +225,11 @@ impl GenerateApplyFnVisitor {
     ) -> TokenStream {
         match (is_base_opt, is_wrapped, is_nested) {
             (true, false, true) => quote! {
-               match (&mut t.#ident, self.#ident) {
-                   (None, Some(nested)) => t.#ident = nested.#ident.try_into(),
-                   (Some(existing), Some(nested)) => nested.#ident.apply_to(existing),
-                   (_, None) => {},
-               }
+                if let Some(existing) = &mut t.#ident {
+                    self.#ident.apply_to(existing);
+                } else {
+                    t.#ident = self.#ident.try_into().ok();
+                }
             },
             (true, false, false) => quote! {
                 if self.#ident.is_some() {
@@ -230,7 +238,10 @@ impl GenerateApplyFnVisitor {
             },
             (false, false, true) => quote! { self.#ident.apply_to(&mut t.#ident); },
             (false, false, false) => quote! { t.#ident = self.#ident; },
-            (_, true, true) => {
+            (true, true, true) => {
+                quote! { if let (Some(inner), Some(target)) = (self.#ident, &mut t.#ident) { inner.apply_to(target); } }
+            }
+            (false, true, true) => {
                 quote! { if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } }
             }
             (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
@@ -243,24 +254,25 @@ impl GenerateApplyFnVisitor {
         is_base_opt: bool,
     ) -> TokenStream {
         match (is_base_opt, is_wrapped, is_nested) {
-            (true, false, true) => quote! {
-               match (&mut t.#ident, self.#ident) {
-                   (None, Some(nested)) => t.#ident = Some(nested),
-                   (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
-                   (_, None) => {},
-               }
+            (_, false, true) => quote! {
+                self.#ident.apply_to_opt(&mut t.#ident);
             },
             (true, false, false) => quote! {
                 if self.#ident.is_some() {
                     t.#ident = self.#ident;
                 }
             },
-            (false, false, true) => quote! { self.#ident.apply_to_opt(&mut t.#ident); },
             (false, false, false) => quote! { t.#ident = self.#ident; },
-            (_, true, true) => {
-                quote! { if let Some(inner) = self.#ident { inner.apply_to_opt(&mut t.#ident); } }
+            (_, true, true) => quote! {
+               match (&mut t.#ident, self.#ident) {
+                   (None, Some(nested)) => t.#ident = Some(nested),
+                   (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
+                   (_, None) => {},
+               }
+            },
+            (_, true, false) => {
+                quote! { if let Some(inner) = self.#ident { t.#ident = Some(inner); } }
             }
-            (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
         }
     }
 }
@@ -282,8 +294,12 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
 
         let inc_concrete =
             Self::get_incremental_setter_concrete(ident, is_wrapped, is_nested, is_base_opt);
-        let inc_opt =
-            Self::get_incremental_setter_opt(ident, false, is_nested, is_wrapped || is_base_opt);
+        let inc_opt = Self::get_incremental_setter_opt(
+            ident,
+            is_wrapped,
+            is_nested,
+            is_wrapped || is_base_opt,
+        );
 
         let acc_concrete = &self.acc_concrete;
         self.acc_concrete = quote! {
