@@ -282,7 +282,6 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
 
         let inc_concrete =
             Self::get_incremental_setter_concrete(ident, is_wrapped, is_nested, is_base_opt);
-        // Opt <-> Opt is never wrapped. But both have an Option<> if the initial type IS wrapped!
         let inc_opt =
             Self::get_incremental_setter_opt(ident, false, is_nested, is_wrapped || is_base_opt);
 
