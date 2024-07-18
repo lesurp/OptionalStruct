@@ -425,6 +425,7 @@ fn visit_fields(
     for (struct_index, (old_field, new_field)) in
         old_fields.iter_mut().zip(new_fields.iter_mut()).enumerate()
     {
+        let mut overriden_wrapping = false;
         let mut wrapping_behavior =
             !is_type_option(&old_field.ty) && global_options.default_wrapping_behavior;
         let mut cfg_attribute = None;
@@ -438,11 +439,15 @@ fn visit_fields(
                         .parse_args()
                         .unwrap_or_else(|_| panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one argument (the new type to use)"));
                     new_type = Some(args);
-                    wrapping_behavior = false;
+                    if !overriden_wrapping {
+                        wrapping_behavior = false;
+                    }
                 } else if a.path().is_ident(SKIP_WRAP_ATTRIBUTE) {
                     wrapping_behavior = false;
+                    overriden_wrapping = true;
                 } else if a.path().is_ident(WRAP_ATTRIBUTE) {
                     wrapping_behavior = true;
+                    overriden_wrapping = true;
                 } else if a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE) {
                     serde_skip = true;
                 } else if a.path().is_ident(CFG_ATTRIBUTE) {
