@@ -104,9 +104,23 @@ fn with_nested_option_skip_wrap() {
         quote!(),
         quote!(
             struct Foo {
-                #[optional_rename(OptionalInner)]
                 #[optional_skip_wrap]
-                inner: Option<Inner>,
+                #[optional_rename(OptionalInner)]
+                inner1: Option<Inner>,
+
+                #[optional_rename(OptionalInner)]
+                #[optional_wrap]
+                inner2: Option<Inner>,
+
+                #[optional_wrap]
+                inner3: Option<Inner>,
+
+                #[optional_skip_wrap]
+                inner4: Option<Inner>,
+
+                #[optional_wrap]
+                #[optional_rename(OptionalInner)]
+                inner5: Option<Inner>,
             }
         ),
     );
