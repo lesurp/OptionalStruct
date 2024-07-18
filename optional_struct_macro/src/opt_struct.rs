@@ -379,13 +379,11 @@ impl OptionalFieldVisitor for RemoveHelperAttributesVisitor {
             .iter()
             .enumerate()
             .filter_map(|(i, a)| {
-                if a.path().is_ident(RENAME_ATTRIBUTE) {
-                    Some(i)
-                } else if a.path().is_ident(SKIP_WRAP_ATTRIBUTE) {
-                    Some(i)
-                } else if a.path().is_ident(WRAP_ATTRIBUTE) {
-                    Some(i)
-                } else if a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE) {
+                if a.path().is_ident(RENAME_ATTRIBUTE)
+                    || a.path().is_ident(SKIP_WRAP_ATTRIBUTE)
+                    || a.path().is_ident(WRAP_ATTRIBUTE)
+                    || a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE)
+                {
                     Some(i)
                 } else {
                     None
@@ -438,7 +436,7 @@ fn visit_fields(
                 if a.path().is_ident(RENAME_ATTRIBUTE) {
                     let args = a
                         .parse_args()
-                        .expect(&format!("'{RENAME_ATTRIBUTE}' attribute expects one and only one argument (the new type to use)"));
+                        .unwrap_or_else(|_| panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one argument (the new type to use)"));
                     new_type = Some(args);
                     wrapping_behavior = false;
                 } else if a.path().is_ident(SKIP_WRAP_ATTRIBUTE) {
@@ -465,7 +463,7 @@ fn visit_fields(
             serde_skip,
         };
         for v in &mut *visitors {
-            v.visit(&global_options, old_field, new_field, &field_options);
+            v.visit(global_options, old_field, new_field, &field_options);
         }
     }
     (orig, new)
@@ -642,5 +640,3 @@ pub fn opt_struct(attr: TokenStream, input: TokenStream) -> OptionalStructOutput
         generated,
     }
 }
-
-
