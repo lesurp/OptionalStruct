@@ -146,11 +146,19 @@ impl OptionalFieldVisitor for GenerateTryFromImpl {
                 quote! { .unwrap() },
                 quote! { #cfg_attr if v.#ident.is_none() { return Err(v); } },
             ),
-            (_, true, true) => (
+            (true, true, true) => (
+                quote! { .unwrap().try_into().ok() },
+                quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } },
+            ),
+            (false, true, true) => (
                 quote! { .unwrap().try_into().unwrap() },
                 quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } },
             ),
-            (_, false, true) => (
+            (true, false, true) => (
+                quote! { .try_into().ok() },
+                quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } },
+            ),
+            (false, false, true) => (
                 quote! { .try_into().unwrap() },
                 quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } },
             ),
@@ -217,11 +225,11 @@ impl GenerateApplyFnVisitor {
     ) -> TokenStream {
         match (is_base_opt, is_wrapped, is_nested) {
             (true, false, true) => quote! {
-               match (&mut t.#ident, self.#ident) {
-                   (None, Some(nested)) => t.#ident = nested.#ident.try_into(),
-                   (Some(existing), Some(nested)) => nested.#ident.apply_to(existing),
-                   (_, None) => {},
-               }
+                if let Some(existing) = &mut t.#ident {
+                    self.#ident.apply_to(existing);
+                } else {
+                    t.#ident = self.#ident.try_into().ok();
+                }
             },
             (true, false, false) => quote! {
                 if self.#ident.is_some() {
@@ -230,7 +238,10 @@ impl GenerateApplyFnVisitor {
             },
             (false, false, true) => quote! { self.#ident.apply_to(&mut t.#ident); },
             (false, false, false) => quote! { t.#ident = self.#ident; },
-            (_, true, true) => {
+            (true, true, true) => {
+                quote! { if let (Some(inner), Some(target)) = (self.#ident, &mut t.#ident) { inner.apply_to(target); } }
+            }
+            (false, true, true) => {
                 quote! { if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } }
             }
             (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
@@ -243,24 +254,25 @@ impl GenerateApplyFnVisitor {
         is_base_opt: bool,
     ) -> TokenStream {
         match (is_base_opt, is_wrapped, is_nested) {
-            (true, false, true) => quote! {
-               match (&mut t.#ident, self.#ident) {
-                   (None, Some(nested)) => t.#ident = Some(nested),
-                   (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
-                   (_, None) => {},
-               }
+            (_, false, true) => quote! {
+                self.#ident.apply_to_opt(&mut t.#ident);
             },
             (true, false, false) => quote! {
                 if self.#ident.is_some() {
                     t.#ident = self.#ident;
                 }
             },
-            (false, false, true) => quote! { self.#ident.apply_to_opt(&mut t.#ident); },
             (false, false, false) => quote! { t.#ident = self.#ident; },
-            (_, true, true) => {
-                quote! { if let Some(inner) = self.#ident { inner.apply_to_opt(&mut t.#ident); } }
+            (_, true, true) => quote! {
+               match (&mut t.#ident, self.#ident) {
+                   (None, Some(nested)) => t.#ident = Some(nested),
+                   (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
+                   (_, None) => {},
+               }
+            },
+            (_, true, false) => {
+                quote! { if let Some(inner) = self.#ident { t.#ident = Some(inner); } }
             }
-            (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
         }
     }
 }
@@ -282,9 +294,12 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
 
         let inc_concrete =
             Self::get_incremental_setter_concrete(ident, is_wrapped, is_nested, is_base_opt);
-        // Opt <-> Opt is never wrapped. But both have an Option<> if the initial type IS wrapped!
-        let inc_opt =
-            Self::get_incremental_setter_opt(ident, false, is_nested, is_wrapped || is_base_opt);
+        let inc_opt = Self::get_incremental_setter_opt(
+            ident,
+            is_wrapped,
+            is_nested,
+            is_wrapped || is_base_opt,
+        );
 
         let acc_concrete = &self.acc_concrete;
         self.acc_concrete = quote! {
@@ -380,13 +395,11 @@ impl OptionalFieldVisitor for RemoveHelperAttributesVisitor {
             .iter()
             .enumerate()
             .filter_map(|(i, a)| {
-                if a.path().is_ident(RENAME_ATTRIBUTE) {
-                    Some(i)
-                } else if a.path().is_ident(SKIP_WRAP_ATTRIBUTE) {
-                    Some(i)
-                } else if a.path().is_ident(WRAP_ATTRIBUTE) {
-                    Some(i)
-                } else if a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE) {
+                if a.path().is_ident(RENAME_ATTRIBUTE)
+                    || a.path().is_ident(SKIP_WRAP_ATTRIBUTE)
+                    || a.path().is_ident(WRAP_ATTRIBUTE)
+                    || a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE)
+                {
                     Some(i)
                 } else {
                     None
@@ -428,6 +441,7 @@ fn visit_fields(
     for (struct_index, (old_field, new_field)) in
         old_fields.iter_mut().zip(new_fields.iter_mut()).enumerate()
     {
+        let mut overriden_wrapping = false;
         let mut wrapping_behavior =
             !is_type_option(&old_field.ty) && global_options.default_wrapping_behavior;
         let mut cfg_attribute = None;
@@ -439,13 +453,17 @@ fn visit_fields(
                 if a.path().is_ident(RENAME_ATTRIBUTE) {
                     let args = a
                         .parse_args()
-                        .expect(&format!("'{RENAME_ATTRIBUTE}' attribute expects one and only one argument (the new type to use)"));
+                        .unwrap_or_else(|_| panic!("'{RENAME_ATTRIBUTE}' attribute expects one and only one argument (the new type to use)"));
                     new_type = Some(args);
-                    wrapping_behavior = false;
+                    if !overriden_wrapping {
+                        wrapping_behavior = false;
+                    }
                 } else if a.path().is_ident(SKIP_WRAP_ATTRIBUTE) {
                     wrapping_behavior = false;
+                    overriden_wrapping = true;
                 } else if a.path().is_ident(WRAP_ATTRIBUTE) {
                     wrapping_behavior = true;
+                    overriden_wrapping = true;
                 } else if a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE) {
                     serde_skip = true;
                 } else if a.path().is_ident(CFG_ATTRIBUTE) {
@@ -466,7 +484,7 @@ fn visit_fields(
             serde_skip,
         };
         for v in &mut *visitors {
-            v.visit(&global_options, old_field, new_field, &field_options);
+            v.visit(global_options, old_field, new_field, &field_options);
         }
     }
     (orig, new)
@@ -643,5 +661,3 @@ pub fn opt_struct(attr: TokenStream, input: TokenStream) -> OptionalStructOutput
         generated,
     }
 }
-
-
