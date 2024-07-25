@@ -50,7 +50,7 @@ impl GenerateCanConvertImpl {
 
         quote! {
             impl #impl_generics #new_name #ty_generics {
-                fn can_convert(&self) -> bool {
+                pub fn can_convert(&self) -> bool {
                     #acc
                     true
                 }
