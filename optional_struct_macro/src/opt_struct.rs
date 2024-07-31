@@ -34,64 +34,6 @@ trait OptionalFieldVisitor {
     );
 }
 
-struct GenerateCanConvertImpl {
-    acc: TokenStream,
-}
-
-impl GenerateCanConvertImpl {
-    fn new() -> Self {
-        GenerateCanConvertImpl { acc: quote! {} }
-    }
-
-    fn get_implementation(self, derive_input: &DeriveInput, new: &DeriveInput) -> TokenStream {
-        let (impl_generics, ty_generics, _) = derive_input.generics.split_for_impl();
-        let new_name = &new.ident;
-        let acc = self.acc;
-
-        quote! {
-            impl #impl_generics #new_name #ty_generics {
-                fn can_convert(&self) -> bool {
-                    #acc
-                    true
-                }
-            }
-        }
-    }
-}
-
-impl OptionalFieldVisitor for GenerateCanConvertImpl {
-    fn visit(
-        &mut self,
-        _global_options: &GlobalOptions,
-        old_field: &mut Field,
-        _new_field: &mut Field,
-        field_options: &FieldOptions,
-    ) {
-        let ident = &field_options.field_ident;
-        let cfg_attr = &field_options.cfg_attribute;
-
-        let is_wrapped = field_options.wrapping_behavior;
-        let is_nested = field_options.new_type.is_some();
-        let is_base_opt = is_type_option(&old_field.ty);
-        let inc = match (is_base_opt, is_wrapped, is_nested) {
-            (_, true, false) => quote! { self.#ident.is_some() },
-            (_, true, true) => {
-                quote! { if let Some(i) = &self.#ident { !i.can_convert() } else { false } }
-            }
-            (_, false, true) => quote! { self.#ident.can_convert() },
-            (_, false, false) => quote! { true },
-        };
-        let acc = &self.acc;
-        self.acc = quote! {
-            #acc
-            #cfg_attr
-            if !#inc {
-                return false;
-            }
-        };
-    }
-}
-
 struct GenerateTryFromImpl {
     field_assign_acc: TokenStream,
     field_check_acc: TokenStream,
@@ -181,16 +123,18 @@ impl OptionalFieldVisitor for GenerateTryFromImpl {
     }
 }
 
-struct GenerateApplyFnVisitor {
+struct GenerateApplicableImplVisitor {
     acc_concrete: TokenStream,
     acc_opt: TokenStream,
+    acc_can_convert: TokenStream,
 }
 
-impl GenerateApplyFnVisitor {
+impl GenerateApplicableImplVisitor {
     fn new() -> Self {
-        GenerateApplyFnVisitor {
+        GenerateApplicableImplVisitor {
             acc_concrete: quote! {},
             acc_opt: quote! {},
+            acc_can_convert: quote! {},
         }
     }
 
@@ -200,6 +144,7 @@ impl GenerateApplyFnVisitor {
         let new_name = &new.ident;
         let acc_concrete = self.acc_concrete;
         let acc_opt = self.acc_opt;
+        let acc_can_convert = self.acc_can_convert;
         // TODO: everything was written with "t" as the parameter name, but this a. does not match
         // the trait and b. is not explicit enough. Make this some parameter instead.
         quote! {
@@ -212,6 +157,11 @@ impl GenerateApplyFnVisitor {
 
                 fn apply_to_opt(self, t: &mut Self) {
                     #acc_opt
+                }
+
+                fn can_convert(&self) -> bool {
+                    #acc_can_convert
+                    true
                 }
             }
         }
@@ -277,7 +227,7 @@ impl GenerateApplyFnVisitor {
     }
 }
 
-impl OptionalFieldVisitor for GenerateApplyFnVisitor {
+impl OptionalFieldVisitor for GenerateApplicableImplVisitor {
     fn visit(
         &mut self,
         _global_options: &GlobalOptions,
@@ -315,6 +265,37 @@ impl OptionalFieldVisitor for GenerateApplyFnVisitor {
 
             #cfg_attr
             #inc_opt
+        };
+
+        let inc_can_convert = match (is_base_opt, is_wrapped, is_nested) {
+            (_, true, false) => quote! {
+                if self.#ident.is_none() {
+                    return false;
+                }
+            },
+            (_, true, true) => {
+                quote! {
+                    if let Some(i) = &self.#ident {
+                        if !i.can_convert() {
+                            return false;
+                        }
+                    } else {
+                        return false;
+                    }
+                }
+            }
+            (_, false, true) => quote! {
+                if !self.#ident.can_convert() {
+                    return false;
+                }
+            },
+            (_, false, false) => quote! {},
+        };
+        let acc_can_convert = &self.acc_can_convert;
+        self.acc_can_convert = quote! {
+            #acc_can_convert
+            #cfg_attr
+            #inc_can_convert
         };
     }
 }
@@ -624,36 +605,32 @@ pub fn opt_struct(attr: TokenStream, input: TokenStream) -> OptionalStructOutput
     let derive_input = syn::parse2::<DeriveInput>(input).unwrap();
     let macro_params = GlobalOptions::new(syn::parse2::<_>(attr).unwrap(), &derive_input);
 
-    let mut apply_fn_generator = GenerateApplyFnVisitor::new();
+    let mut applicable_impl_generator = GenerateApplicableImplVisitor::new();
     let mut try_from_generator = GenerateTryFromImpl::new();
-    let mut can_convert_generator = GenerateCanConvertImpl::new();
 
     let mut visitors = [
         &mut RemoveHelperAttributesVisitor as &mut dyn OptionalFieldVisitor,
         &mut SetNewFieldVisibilityVisitor,
         &mut SetNewFieldTypeVisitor,
         &mut AddSerdeSkipAttribute,
-        &mut apply_fn_generator,
+        &mut applicable_impl_generator,
         &mut try_from_generator,
-        &mut can_convert_generator,
     ];
 
     let (orig, mut new) = visit_fields(&mut visitors, &macro_params, &derive_input);
 
     new.ident = Ident::new(&macro_params.new_struct_name, new.ident.span());
 
-    let apply_fn_impl = apply_fn_generator.get_implementation(&derive_input, &new);
     let try_from_impl = try_from_generator.get_implementation(&derive_input, &new);
-    let can_convert_impl = can_convert_generator.get_implementation(&derive_input, &new);
+    let applicable_impl = applicable_impl_generator.get_implementation(&derive_input, &new);
 
     let derives = get_derive_macros(&new, &macro_params.extra_derive);
 
     let generated = quote! {
         #derives
         #new
-        #apply_fn_impl
+        #applicable_impl
         #try_from_impl
-        #can_convert_impl
     };
 
     OptionalStructOutput {

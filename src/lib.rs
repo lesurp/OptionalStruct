@@ -18,4 +18,6 @@ pub trait Applicable: Sized {
         other.apply_to_opt(&mut self);
         self
     }
+
+    fn can_convert(&self) -> bool;
 }
