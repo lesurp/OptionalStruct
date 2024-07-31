@@ -1,6 +1,6 @@
 [package]
 name = "optional_struct_macro"
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 description = "Helper crate implementing the proc_macro for the optional_struct crate"
 license = "Apache-2.0"
