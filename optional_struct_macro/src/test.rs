@@ -29,6 +29,19 @@ fn with_nested() {
 }
 
 #[test]
+fn with_skip() {
+    opt_struct(
+        quote!(),
+        quote!(
+            struct Foo {
+                #[optional_skip]
+                bar: Bar,
+            }
+        ),
+    );
+}
+
+#[test]
 fn with_serde_skip() {
     opt_struct(
         quote!(),

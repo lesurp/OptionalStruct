@@ -189,6 +189,24 @@ struct will have the same field tagged `#[serde(skip_serializing_if = "Option::i
 This attribute makes serde skip fields entirely if the value of the `Option` is
 none (rather than saving e.g. `"value" = null` if serializing to json).
 
+7. Skip a field entirely:
+
+```rust
+#[optional_struct]
+#[derive(Default)]
+struct Foo {
+    #[optional_skip]
+    bar: char,
+    baz: bool,
+}
+
+fn main() {
+    let opt_f = OptionalFoo { baz: Some(false) };
+}
+```
+
+If the `optional_skip` attribute is used, `Default` is used to fill in missing fields in the ``TryFrom` implementation.   Therefore Default must be implemented on the struct.
+
 ## `apply`, `build`, and `try_build`
 
 Those three functions are used to build the final version of the structure, by

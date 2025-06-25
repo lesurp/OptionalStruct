@@ -13,12 +13,14 @@ use syn::{
 const RENAME_ATTRIBUTE: &str = "optional_rename";
 const SKIP_WRAP_ATTRIBUTE: &str = "optional_skip_wrap";
 const WRAP_ATTRIBUTE: &str = "optional_wrap";
+const SKIP_ATTRIBUTE: &str = "optional_skip";
 const SERDE_SKIP_SERIALIZING_NONE: &str = "optional_serde_skip_none";
 const CFG_ATTRIBUTE: &str = "cfg";
 
 struct FieldOptions {
     wrapping_behavior: bool,
     serde_skip: bool,
+    skip: bool,
     cfg_attribute: Option<Attribute>,
     new_type: Option<TokenTree>,
     field_ident: TokenStream,
@@ -37,6 +39,7 @@ trait OptionalFieldVisitor {
 struct GenerateTryFromImpl {
     field_assign_acc: TokenStream,
     field_check_acc: TokenStream,
+    has_skip: bool,
 }
 
 impl GenerateTryFromImpl {
@@ -44,6 +47,7 @@ impl GenerateTryFromImpl {
         GenerateTryFromImpl {
             field_check_acc: quote! {},
             field_assign_acc: quote! {},
+            has_skip: false,
         }
     }
 
@@ -53,6 +57,13 @@ impl GenerateTryFromImpl {
         let new_name = &new.ident;
         let field_check_acc = self.field_check_acc;
         let field_assign_acc = self.field_assign_acc;
+        let default = if self.has_skip {
+            quote! {
+                ..Default::default()
+            }
+        } else {
+            quote! {}
+        };
 
         quote! {
                 impl #impl_generics TryFrom<#new_name #ty_generics > #where_clause for #old_name #ty_generics {
@@ -62,6 +73,7 @@ impl GenerateTryFromImpl {
                         #field_check_acc
                         Ok(Self {
                             #field_assign_acc
+                            #default
                         })
                     }
                 }
@@ -83,37 +95,47 @@ impl OptionalFieldVisitor for GenerateTryFromImpl {
         let is_wrapped = field_options.wrapping_behavior;
         let is_nested = field_options.new_type.is_some();
         let is_base_opt = is_type_option(&old_field.ty);
-        let (unwrap, check) = match (is_base_opt, is_wrapped, is_nested) {
-            (_, true, false) => (
+        let is_skip = field_options.skip;
+        let (unwrap, check) = match (is_skip, is_base_opt, is_wrapped, is_nested) {
+            (false, _, true, false) => (
                 quote! { .unwrap() },
                 quote! { #cfg_attr if v.#ident.is_none() { return Err(v); } },
             ),
-            (true, true, true) => (
+            (false, true, true, true) => (
                 quote! { .unwrap().try_into().ok() },
                 quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } },
             ),
-            (false, true, true) => (
+            (false, false, true, true) => (
                 quote! { .unwrap().try_into().unwrap() },
                 quote! { #cfg_attr if let Some(i) = &v.#ident { if !i.can_convert() { return Err(v); } } else { return Err(v); } },
             ),
-            (true, false, true) => (
+            (false, true, false, true) => (
                 quote! { .try_into().ok() },
                 quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } },
             ),
-            (false, false, true) => (
+            (false, false, false, true) => (
                 quote! { .try_into().unwrap() },
                 quote! { #cfg_attr if !v.#ident.can_convert() { return Err(v); } },
             ),
-            (_, false, false) => (quote! {}, quote! {}),
+            (true, _, _, _) | (_, _, false, false) => (quote! {}, quote! {}),
         };
 
         let field_assign_acc = &self.field_assign_acc;
-        self.field_assign_acc = quote! {
-            #field_assign_acc
-            #cfg_attr
+        self.field_assign_acc = if is_skip {
+            quote! {
+                #field_assign_acc
+            }
+        } else {
+            quote! {
+                #field_assign_acc
+                #cfg_attr
 
-            #ident: v.#ident #unwrap,
+                #ident: v.#ident #unwrap,
+            }
         };
+        if is_skip {
+            self.has_skip = true;
+        }
 
         let field_check_acc = &self.field_check_acc;
         self.field_check_acc = quote! {
@@ -172,29 +194,33 @@ impl GenerateApplicableImplVisitor {
         is_wrapped: bool,
         is_nested: bool,
         is_base_opt: bool,
+        is_skip: bool,
     ) -> TokenStream {
-        match (is_base_opt, is_wrapped, is_nested) {
-            (true, false, true) => quote! {
+        match (is_skip, is_base_opt, is_wrapped, is_nested) {
+            (true, _, _, _) => quote! {},
+            (false, true, false, true) => quote! {
                 if let Some(existing) = &mut t.#ident {
                     self.#ident.apply_to(existing);
                 } else {
                     t.#ident = self.#ident.try_into().ok();
                 }
             },
-            (true, false, false) => quote! {
+            (false, true, false, false) => quote! {
                 if self.#ident.is_some() {
                     t.#ident = self.#ident;
                 }
             },
-            (false, false, true) => quote! { self.#ident.apply_to(&mut t.#ident); },
-            (false, false, false) => quote! { t.#ident = self.#ident; },
-            (true, true, true) => {
+            (false, false, false, true) => quote! { self.#ident.apply_to(&mut t.#ident); },
+            (false, false, false, false) => quote! { t.#ident = self.#ident; },
+            (false, true, true, true) => {
                 quote! { if let (Some(inner), Some(target)) = (self.#ident, &mut t.#ident) { inner.apply_to(target); } }
-            }
-            (false, true, true) => {
+            },
+            (false, false, true, true) => {
                 quote! { if let Some(inner) = self.#ident { inner.apply_to(&mut t.#ident); } }
-            }
-            (_, true, false) => quote! { if let Some(inner) = self.#ident { t.#ident = inner; } },
+            },
+            (false, _, true, false) => {
+                quote! { if let Some(inner) = self.#ident { t.#ident = inner; } }
+            },
         }
     }
     fn get_incremental_setter_opt(
@@ -202,27 +228,29 @@ impl GenerateApplicableImplVisitor {
         is_wrapped: bool,
         is_nested: bool,
         is_base_opt: bool,
+        is_skip: bool,
     ) -> TokenStream {
-        match (is_base_opt, is_wrapped, is_nested) {
-            (_, false, true) => quote! {
+        match (is_skip, is_base_opt, is_wrapped, is_nested) {
+            (true, _, _, _) => quote! {},
+            (false, _, false, true) => quote! {
                 self.#ident.apply_to_opt(&mut t.#ident);
             },
-            (true, false, false) => quote! {
+            (false, true, false, false) => quote! {
                 if self.#ident.is_some() {
                     t.#ident = self.#ident;
                 }
             },
-            (false, false, false) => quote! { t.#ident = self.#ident; },
-            (_, true, true) => quote! {
+            (false, false, false, false) => quote! { t.#ident = self.#ident; },
+            (false, _, true, true) => quote! {
                match (&mut t.#ident, self.#ident) {
                    (None, Some(nested)) => t.#ident = Some(nested),
                    (Some(existing), Some(nested)) => nested.apply_to_opt(existing),
                    (_, None) => {},
                }
             },
-            (_, true, false) => {
+            (false, _, true, false) => {
                 quote! { if let Some(inner) = self.#ident { t.#ident = Some(inner); } }
-            }
+            },
         }
     }
 }
@@ -241,14 +269,21 @@ impl OptionalFieldVisitor for GenerateApplicableImplVisitor {
         let is_wrapped = field_options.wrapping_behavior;
         let is_nested = field_options.new_type.is_some();
         let is_base_opt = is_type_option(&old_field.ty);
+        let is_skip = field_options.skip;
 
-        let inc_concrete =
-            Self::get_incremental_setter_concrete(ident, is_wrapped, is_nested, is_base_opt);
+        let inc_concrete = Self::get_incremental_setter_concrete(
+            ident,
+            is_wrapped,
+            is_nested,
+            is_base_opt,
+            is_skip,
+        );
         let inc_opt = Self::get_incremental_setter_opt(
             ident,
             is_wrapped,
             is_nested,
             is_wrapped || is_base_opt,
+            is_skip,
         );
 
         let acc_concrete = &self.acc_concrete;
@@ -267,13 +302,13 @@ impl OptionalFieldVisitor for GenerateApplicableImplVisitor {
             #inc_opt
         };
 
-        let inc_can_convert = match (is_base_opt, is_wrapped, is_nested) {
-            (_, true, false) => quote! {
+        let inc_can_convert = match (is_skip, is_base_opt, is_wrapped, is_nested) {
+            (false, _, true, false) => quote! {
                 if self.#ident.is_none() {
                     return false;
                 }
             },
-            (_, true, true) => {
+            (false, _, true, true) => {
                 quote! {
                     if let Some(i) = &self.#ident {
                         if !i.can_convert() {
@@ -283,13 +318,13 @@ impl OptionalFieldVisitor for GenerateApplicableImplVisitor {
                         return false;
                     }
                 }
-            }
-            (_, false, true) => quote! {
+            },
+            (false, _, false, true) => quote! {
                 if !self.#ident.can_convert() {
                     return false;
                 }
             },
-            (_, false, false) => quote! {},
+            (true, _, _, _) | (_, _, false, false) => quote! {},
         };
         let acc_can_convert = &self.acc_can_convert;
         self.acc_can_convert = quote! {
@@ -380,6 +415,7 @@ impl OptionalFieldVisitor for RemoveHelperAttributesVisitor {
                     || a.path().is_ident(SKIP_WRAP_ATTRIBUTE)
                     || a.path().is_ident(WRAP_ATTRIBUTE)
                     || a.path().is_ident(SERDE_SKIP_SERIALIZING_NONE)
+                    || a.path().is_ident(SKIP_ATTRIBUTE)
                 {
                     Some(i)
                 } else {
@@ -428,6 +464,7 @@ fn visit_fields(
         let mut cfg_attribute = None;
         let mut new_type = None;
         let mut serde_skip = false;
+        let mut skip = false;
         old_field.attrs
             .iter()
             .for_each(|a| {
@@ -449,6 +486,8 @@ fn visit_fields(
                     serde_skip = true;
                 } else if a.path().is_ident(CFG_ATTRIBUTE) {
                     cfg_attribute = Some(a.clone());
+                } else if a.path().is_ident(SKIP_ATTRIBUTE) {
+                    skip = true;
                 }
             });
         let field_ident = if let Some(ident) = &old_field.ident {
@@ -463,6 +502,7 @@ fn visit_fields(
             new_type,
             field_ident,
             serde_skip,
+            skip,
         };
         for v in &mut *visitors {
             v.visit(global_options, old_field, new_field, &field_options);
@@ -550,7 +590,7 @@ fn is_type_option(t: &Type) -> bool {
         // No clue what to do with those
         Type::ImplTrait(_) | Type::TraitObject(_) => {
             panic!("Might already be an option I have no way to tell :/")
-        }
+        },
         Type::Infer(_) => panic!("If you cannot tell, neither can I"),
         Type::Macro(_) => panic!("Don't think I can handle this easily..."),
 
